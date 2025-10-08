@@ -31,12 +31,16 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadFeaturedCourses() async {
     try {
       final courses = await _courseService.getAllCourses();
-      setState(() {
-        _featuredCourses = courses.take(3).toList();
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _featuredCourses = courses.take(3).toList();
+          _isLoading = false;
+        });
+      }
     } catch (e) {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 

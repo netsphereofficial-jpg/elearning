@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import '../../constants/app_theme.dart';
 import '../../models/course_model.dart';
 import '../../services/admin_course_service.dart';
+import '../../services/bunny_upload_service.dart';
 
 class CourseFormScreen extends StatefulWidget {
   final CourseModel? course;
@@ -248,6 +250,8 @@ class _VideoFormDialog extends StatefulWidget {
 
 class _VideoFormDialogState extends State<_VideoFormDialog> {
   final _formKey = GlobalKey<FormState>();
+  final BunnyUploadService _uploadService = BunnyUploadService();
+
   late TextEditingController _titleController;
   late TextEditingController _descController;
   late TextEditingController _guidController;
@@ -255,6 +259,10 @@ class _VideoFormDialogState extends State<_VideoFormDialog> {
   late TextEditingController _durationController;
   late TextEditingController _orderController;
   bool _isFree = false;
+
+  bool _isUploading = false;
+  double _uploadProgress = 0.0;
+  String? _selectedFileName;
 
   @override
   void initState() {
@@ -278,6 +286,92 @@ class _VideoFormDialogState extends State<_VideoFormDialog> {
     _durationController.dispose();
     _orderController.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickAndUploadVideo() async {
+    try {
+      // Validate title first
+      final title = _titleController.text.trim();
+      if (title.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please enter a video title first!'),
+            backgroundColor: AppTheme.errorColor,
+          ),
+        );
+        return;
+      }
+
+      // Pick video file
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.video,
+        allowMultiple: false,
+      );
+
+      if (result == null || result.files.isEmpty) return;
+
+      final file = result.files.first;
+
+      setState(() {
+        _selectedFileName = file.name;
+        _isUploading = true;
+        _uploadProgress = 0.0;
+      });
+
+      // Create video in Bunny
+      final creationResult = await _uploadService.createVideo(title);
+
+      if (creationResult == null) {
+        throw Exception('Failed to create video in Bunny');
+      }
+
+      // Upload file via Firebase Storage (supports unlimited size)
+      final success = await _uploadService.uploadVideoViaStorage(
+        title: title,
+        bunnyVideoGuid: creationResult.bunnyVideoGuid,
+        fileBytes: file.bytes!,
+        fileName: file.name,
+        onProgress: (progress) {
+          if (mounted) {
+            setState(() {
+              _uploadProgress = progress;
+            });
+          }
+        },
+      );
+
+      if (success) {
+        setState(() {
+          _guidController.text = creationResult.bunnyVideoGuid;
+          _thumbController.text = 'https://vz-d86440c8-58b.b-cdn.net/${creationResult.bunnyVideoGuid}/thumbnail.jpg';
+        });
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Video uploaded successfully! Processing may take a few minutes.'),
+              backgroundColor: AppTheme.successColor,
+            ),
+          );
+        }
+      } else {
+        throw Exception('Failed to upload video');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Upload error: $e'),
+            backgroundColor: AppTheme.errorColor,
+          ),
+        );
+      }
+    } finally {
+      setState(() {
+        _isUploading = false;
+        _uploadProgress = 0.0;
+      });
+    }
   }
 
   void _save() {
@@ -310,39 +404,119 @@ class _VideoFormDialogState extends State<_VideoFormDialog> {
             children: [
               TextFormField(
                 controller: _titleController,
-                decoration: const InputDecoration(labelText: 'Video Title'),
+                decoration: const InputDecoration(
+                  labelText: 'Video Title *',
+                  hintText: 'Required for video upload',
+                  border: OutlineInputBorder(),
+                ),
                 validator: (v) => v?.isEmpty == true ? 'Required' : null,
+                enabled: !_isUploading,
               ),
+              const SizedBox(height: 16),
+
+              // Upload Section
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppTheme.primaryColor.withOpacity(0.3)),
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.cloud_upload, color: AppTheme.primaryColor),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Upload Video File',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: AppTheme.primaryColor,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Supports unlimited file size • Upload via Firebase Storage',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: AppTheme.textSecondary,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    ElevatedButton.icon(
+                      onPressed: _isUploading ? null : _pickAndUploadVideo,
+                      icon: const Icon(Icons.file_upload),
+                      label: Text(_selectedFileName ?? 'Choose Video File'),
+                      style: ElevatedButton.styleFrom(
+                        minimumSize: const Size(double.infinity, 40),
+                      ),
+                    ),
+                    if (_isUploading) ...[
+                      const SizedBox(height: 12),
+                      LinearProgressIndicator(value: _uploadProgress),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Uploading: ${(_uploadProgress * 100).toStringAsFixed(0)}%',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+                    const Text(
+                      'OR enter GUID manually below',
+                      style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+
               TextFormField(
                 controller: _descController,
                 decoration: const InputDecoration(labelText: 'Description'),
                 maxLines: 2,
+                enabled: !_isUploading,
               ),
               TextFormField(
                 controller: _guidController,
-                decoration: const InputDecoration(labelText: 'Bunny Video GUID'),
+                decoration: const InputDecoration(
+                  labelText: 'Bunny Video GUID',
+                  hintText: 'Auto-filled after upload',
+                ),
                 validator: (v) => v?.isEmpty == true ? 'Required' : null,
+                enabled: !_isUploading,
               ),
               TextFormField(
                 controller: _thumbController,
-                decoration: const InputDecoration(labelText: 'Thumbnail URL'),
+                decoration: const InputDecoration(
+                  labelText: 'Thumbnail URL',
+                  hintText: 'Auto-filled after upload',
+                ),
+                enabled: !_isUploading,
               ),
               TextFormField(
                 controller: _durationController,
                 decoration: const InputDecoration(labelText: 'Duration (seconds)'),
                 keyboardType: TextInputType.number,
                 validator: (v) => int.tryParse(v ?? '') == null ? 'Invalid' : null,
+                enabled: !_isUploading,
               ),
               TextFormField(
                 controller: _orderController,
                 decoration: const InputDecoration(labelText: 'Order'),
                 keyboardType: TextInputType.number,
                 validator: (v) => int.tryParse(v ?? '') == null ? 'Invalid' : null,
+                enabled: !_isUploading,
               ),
               SwitchListTile(
                 title: const Text('Free Preview'),
                 value: _isFree,
-                onChanged: (v) => setState(() => _isFree = v),
+                onChanged: _isUploading ? null : (v) => setState(() => _isFree = v),
               ),
             ],
           ),
@@ -350,11 +524,11 @@ class _VideoFormDialogState extends State<_VideoFormDialog> {
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.pop(context),
+          onPressed: _isUploading ? null : () => Navigator.pop(context),
           child: const Text('Cancel'),
         ),
         ElevatedButton(
-          onPressed: _save,
+          onPressed: _isUploading ? null : _save,
           child: const Text('Save'),
         ),
       ],

@@ -117,7 +117,7 @@ exports.generateSignedVideoUrl = onCall(async (request) => {
 });
 
 /**
- * Upload video to Bunny Stream (Admin only)
+ * Upload video to Bunny Stream (Admin only) - Legacy function
  */
 exports.uploadVideoToBunny = onCall(async (request) => {
   try {
@@ -189,6 +189,122 @@ exports.uploadVideoToBunny = onCall(async (request) => {
   } catch (error) {
     console.error("Error creating video in Bunny:", error);
     throw new Error(`Failed to create video: ${error.message}`);
+  }
+});
+
+/**
+ * Create video in Bunny Stream and return upload credentials (Admin only)
+ */
+exports.createBunnyVideoForUpload = onCall(async (request) => {
+  try {
+    console.log("createBunnyVideoForUpload called");
+
+    // Check authentication and admin status
+    if (!request.auth) {
+      console.error("No authentication");
+      throw new Error("User must be authenticated.");
+    }
+
+    console.log("User authenticated:", request.auth.uid);
+
+    const userDoc = await admin
+      .firestore()
+      .collection("users")
+      .doc(request.auth.uid)
+      .get();
+
+    if (!userDoc.exists) {
+      console.error("User document not found");
+      throw new Error("User document not found.");
+    }
+
+    const userData = userDoc.data();
+    console.log("User data:", { role: userData.role, email: userData.email });
+
+    // Check if user has admin role
+    if (userData.role !== 'admin') {
+      console.error("User is not admin. Role:", userData.role);
+      throw new Error("User does not have admin privileges.");
+    }
+
+    const { title } = request.data;
+
+    if (!title) {
+      console.error("No title provided");
+      throw new Error("Video title is required.");
+    }
+
+    console.log("Creating video in Bunny with title:", title);
+
+    // Create video in Bunny Stream
+    const response = await axios.post(
+      `https://video.bunnycdn.com/library/${BUNNY_LIBRARY_ID}/videos`,
+      {
+        title: title,
+      },
+      {
+        headers: {
+          AccessKey: BUNNY_API_KEY,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    const bunnyVideoGuid = response.data.guid;
+    console.log("Video created successfully. GUID:", bunnyVideoGuid);
+
+    return {
+      success: true,
+      bunnyVideoGuid: bunnyVideoGuid,
+      libraryId: BUNNY_LIBRARY_ID,
+      uploadApiKey: BUNNY_API_KEY,
+      uploadUrl: `https://video.bunnycdn.com/library/${BUNNY_LIBRARY_ID}/videos/${bunnyVideoGuid}`,
+      thumbnailUrl: `https://${BUNNY_CDN_HOSTNAME}/${bunnyVideoGuid}/thumbnail.jpg`,
+    };
+  } catch (error) {
+    console.error("Error in createBunnyVideoForUpload:", error);
+    console.error("Error details:", error.message, error.stack);
+    throw new Error(`Failed to create video: ${error.message}`);
+  }
+});
+
+/**
+ * Check Bunny video processing status by GUID
+ */
+exports.checkBunnyVideoStatus = onCall(async (request) => {
+  try {
+    if (!request.auth) {
+      throw new Error("User must be authenticated.");
+    }
+
+    const { videoGuid } = request.data;
+
+    if (!videoGuid) {
+      throw new Error("Video GUID is required.");
+    }
+
+    // Get video status from Bunny
+    const response = await axios.get(
+      `https://video.bunnycdn.com/library/${BUNNY_LIBRARY_ID}/videos/${videoGuid}`,
+      {
+        headers: {
+          AccessKey: BUNNY_API_KEY,
+        },
+      }
+    );
+
+    const status = response.data;
+
+    return {
+      status: status.status, // 0-5
+      progress: status.encodeProgress || 0,
+      duration: status.length || 0,
+      availableResolutions: status.availableResolutions || [],
+      message: status.status === 4 || status.status === 5 ? "Ready to stream" : "Processing...",
+    };
+  } catch (error) {
+    console.error("Error checking video status:", error);
+    throw new Error(`Failed to check status: ${error.message}`);
   }
 });
 
@@ -301,6 +417,147 @@ exports.cleanupExpiredSessions = onSchedule("every 1 hours", async (event) => {
 
   console.log(`Cleaned up ${cleanedCount} expired sessions`);
   return { cleanedCount };
+});
+
+/**
+ * Clean up old video upload files from Firebase Storage (runs every hour)
+ */
+exports.cleanupVideoUploads = onSchedule("every 1 hours", async (event) => {
+  try {
+    console.log("Starting video upload cleanup...");
+
+    const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
+    const bucket = admin.storage().bucket();
+
+    // Get all video upload records older than 30 minutes
+    const uploadsSnapshot = await admin
+      .firestore()
+      .collection("videoUploads")
+      .where("uploadedAt", "<", thirtyMinutesAgo)
+      .get();
+
+    let cleanedCount = 0;
+    let errorCount = 0;
+
+    for (const doc of uploadsSnapshot.docs) {
+      const upload = doc.data();
+
+      try {
+        // Delete file from Firebase Storage
+        const file = bucket.file(upload.storagePath);
+        await file.delete();
+        console.log(`Deleted file: ${upload.storagePath}`);
+
+        // Delete the tracking document
+        await doc.ref.delete();
+        cleanedCount++;
+      } catch (error) {
+        // File might already be deleted or not exist
+        console.warn(`Could not delete ${upload.storagePath}:`, error.message);
+
+        // Delete tracking document anyway if file doesn't exist
+        if (error.code === 404 || error.code === "storage/object-not-found") {
+          await doc.ref.delete();
+        } else {
+          errorCount++;
+        }
+      }
+    }
+
+    console.log(`Cleanup complete. Deleted ${cleanedCount} files, ${errorCount} errors`);
+    return { cleanedCount, errorCount };
+  } catch (error) {
+    console.error("Error in cleanup function:", error);
+    return { error: error.message };
+  }
+});
+
+/**
+ * Transfer video from Firebase Storage to Bunny Stream
+ */
+exports.transferVideoToBunny = onCall({ timeoutSeconds: 540 }, async (request) => {
+  try {
+    console.log("transferVideoToBunny called");
+
+    // Check authentication and admin status
+    if (!request.auth) {
+      throw new Error("User must be authenticated.");
+    }
+
+    const userDoc = await admin
+      .firestore()
+      .collection("users")
+      .doc(request.auth.uid)
+      .get();
+
+    if (!userDoc.exists || userDoc.data().role !== "admin") {
+      throw new Error("User does not have admin privileges.");
+    }
+
+    const { bunnyVideoGuid, storagePath, title } = request.data;
+
+    if (!bunnyVideoGuid || !storagePath) {
+      throw new Error("Missing required parameters.");
+    }
+
+    console.log(`Transferring video from ${storagePath} to Bunny GUID ${bunnyVideoGuid}`);
+
+    // Download file from Firebase Storage
+    const bucket = admin.storage().bucket();
+    const file = bucket.file(storagePath);
+
+    // Get file metadata
+    const [metadata] = await file.getMetadata();
+    console.log(`File size: ${metadata.size} bytes`);
+
+    // Make file temporarily public so Bunny can access it
+    await file.makePublic();
+    console.log("File made temporarily public");
+
+    // Get public URL
+    const publicUrl = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+    console.log(`Public URL: ${publicUrl}`);
+
+    // Tell Bunny to fetch the video from the public URL
+    const response = await axios.post(
+      `https://video.bunnycdn.com/library/${BUNNY_LIBRARY_ID}/videos/${bunnyVideoGuid}/fetch`,
+      {
+        url: publicUrl,
+        headers: {},
+      },
+      {
+        headers: {
+          AccessKey: BUNNY_API_KEY,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    console.log("Bunny fetch response:", response.status, response.data);
+
+    // NOTE: We don't delete the file immediately because Bunny needs time to download it.
+    // The "fetch" API returns 200 OK immediately but downloads in background.
+    // Files will be cleaned up by the scheduled cleanup function after 30 minutes.
+
+    // Store metadata for cleanup
+    await admin.firestore().collection("videoUploads").add({
+      bunnyVideoGuid: bunnyVideoGuid,
+      storagePath: storagePath,
+      uploadedAt: admin.firestore.FieldValue.serverTimestamp(),
+      status: "transferred",
+    });
+
+    console.log("Video transfer initiated. File will be cleaned up automatically in 30 minutes.");
+
+    return {
+      success: true,
+      message: "Video is being transferred to Bunny. Processing may take a few minutes.",
+      bunnyVideoGuid: bunnyVideoGuid,
+    };
+  } catch (error) {
+    console.error("Error transferring video to Bunny:", error);
+    throw new Error(`Failed to transfer video: ${error.message}`);
+  }
 });
 
 /**

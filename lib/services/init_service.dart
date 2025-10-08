@@ -1,7 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class InitService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
 
   // Initialize app with test course, payment settings, and admin note
   Future<void> initializeTestData() async {
@@ -9,6 +11,7 @@ class InitService {
       await _initializeSampleCourse();
       await _initializePaymentSettings();
       await _initializeAdminNote();
+      await _createAdminFirestoreDocuments();
     } catch (e) {
       print('Error initializing test data: $e');
     }
@@ -224,6 +227,82 @@ Admin Panel Access:
       }
     } catch (e) {
       print('Error creating admin setup instructions: $e');
+    }
+  }
+
+  // Create Firestore documents for admin users that exist in Firebase Auth
+  Future<void> _createAdminFirestoreDocuments() async {
+    try {
+      print('Checking for admin users in Firebase Auth...');
+
+      final adminEmails = [
+        'admin1@elearning.com',
+        'admin2@elearning.com',
+        'admin3@elearning.com',
+      ];
+
+      for (final email in adminEmails) {
+        try {
+          // Check if user document exists in Firestore
+          final usersQuery = await _firestore
+              .collection('users')
+              .where('email', isEqualTo: email)
+              .limit(1)
+              .get();
+
+          if (usersQuery.docs.isEmpty) {
+            // Try to get the user from Firebase Auth
+            final users = await _auth.fetchSignInMethodsForEmail(email);
+
+            if (users.isNotEmpty) {
+              // User exists in Firebase Auth but not in Firestore
+              print('Found $email in Firebase Auth. Creating Firestore document...');
+
+              // We need to get the UID, but we can't without signing in
+              // So we'll create a helper method to sign in temporarily
+              try {
+                final userCredential = await _auth.signInWithEmailAndPassword(
+                  email: email,
+                  password: 'Admin@123',
+                );
+
+                final user = userCredential.user!;
+
+                // Create user document in Firestore with admin role
+                await _firestore.collection('users').doc(user.uid).set({
+                  'email': email,
+                  'name': email.split('@')[0].replaceAll('admin', 'Admin '),
+                  'photoUrl': null,
+                  'isPremium': false,
+                  'role': 'admin',
+                  'isBlocked': false,
+                  'createdAt': FieldValue.serverTimestamp(),
+                  'lastLoginAt': FieldValue.serverTimestamp(),
+                  'maxConcurrentSessions': 2,
+                });
+
+                print('✅ Created Firestore admin document for $email');
+
+                // Sign out after creating document
+                await _auth.signOut();
+              } catch (authError) {
+                print('Could not auto-create admin document for $email: $authError');
+                print('Please create manually or use correct password.');
+              }
+            } else {
+              print('⚠️  $email does not exist in Firebase Auth');
+            }
+          } else {
+            print('✓ Firestore document already exists for $email');
+          }
+        } catch (e) {
+          print('Error processing $email: $e');
+        }
+      }
+
+      print('Admin Firestore document check complete.');
+    } catch (e) {
+      print('Error creating admin Firestore documents: $e');
     }
   }
 }

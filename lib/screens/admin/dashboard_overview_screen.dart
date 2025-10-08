@@ -26,24 +26,28 @@ class _DashboardOverviewScreenState extends State<DashboardOverviewScreen> {
   }
 
   Future<void> _loadStats() async {
-    setState(() => _isLoading = true);
+    if (mounted) {
+      setState(() => _isLoading = true);
+    }
 
     try {
       final courseStats = await _courseService.getCourseStats();
       final paymentStats = await _paymentService.getPaymentStats();
       final userStats = await _userService.getUserStats();
 
-      setState(() {
-        _stats = {
-          ...courseStats,
-          ...paymentStats,
-          ...userStats,
-        };
-        _isLoading = false;
-      });
-    } catch (e) {
-      setState(() => _isLoading = false);
       if (mounted) {
+        setState(() {
+          _stats = {
+            ...courseStats,
+            ...paymentStats,
+            ...userStats,
+          };
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error loading stats: $e')),
         );

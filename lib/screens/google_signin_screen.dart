@@ -21,6 +21,17 @@ class _GoogleSignInScreenState extends State<GoogleSignInScreen> {
       final user = await authService.signInWithGoogle();
 
       if (user != null && mounted) {
+        // Check if the user is an admin
+        final userData = await authService.getUserData(user.uid);
+        if (userData?.isAdmin == true) {
+          // Admins cannot sign in as regular users
+          await authService.signOut();
+          if (mounted) {
+            _showErrorDialog('Admin accounts cannot sign in here. Please use the admin login page.');
+          }
+          return;
+        }
+
         // Navigate to main app
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => const MainAppScreen()),
@@ -163,6 +174,34 @@ class _GoogleSignInScreenState extends State<GoogleSignInScreen> {
                         style: TextStyle(
                           fontSize: 12,
                           color: Colors.grey[600],
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+
+                      // Admin login link
+                      TextButton(
+                        onPressed: () {
+                          Navigator.of(context).pushNamed('/admin');
+                        },
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.admin_panel_settings,
+                              size: 16,
+                              color: Colors.grey[700],
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Admin Login',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[700],
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],

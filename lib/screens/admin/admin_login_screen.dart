@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../../constants/app_theme.dart';
 import '../../services/admin_auth_service.dart';
 import 'admin_dashboard_screen.dart';
@@ -32,6 +34,16 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
     setState(() => _isLoading = true);
 
     try {
+      // Sign out from any existing Google/regular user session first
+      try {
+        final googleSignIn = GoogleSignIn();
+        if (await googleSignIn.isSignedIn()) {
+          await googleSignIn.signOut();
+        }
+      } catch (e) {
+        print('Error signing out from Google: $e');
+      }
+
       final admin = await _authService.signInWithEmailPassword(
         _emailController.text.trim(),
         _passwordController.text,
@@ -216,6 +228,32 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                                   style: AppTheme.bodySM.copyWith(
                                     color: AppTheme.primaryColor,
                                   ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: AppTheme.spacingLG),
+
+                        // Back to user login link
+                        TextButton(
+                          onPressed: () {
+                            Navigator.of(context).pushReplacementNamed('/');
+                          },
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.arrow_back,
+                                size: 16,
+                                color: AppTheme.textSecondary,
+                              ),
+                              const SizedBox(width: AppTheme.spacingSM),
+                              Text(
+                                'Back to User Login',
+                                style: AppTheme.bodySM.copyWith(
+                                  color: AppTheme.textSecondary,
                                 ),
                               ),
                             ],

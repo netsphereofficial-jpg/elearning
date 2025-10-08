@@ -17,6 +17,8 @@ class AdminDashboardScreen extends StatefulWidget {
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   final AdminAuthService _authService = AdminAuthService();
   int _selectedIndex = 0;
+  bool _isCheckingAuth = true;
+  bool _isAdmin = false;
 
   final List<_NavItem> _navItems = const [
     _NavItem(
@@ -52,6 +54,25 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       const PaymentsListScreen(),
       const UsersListScreen(),
     ];
+    _checkAdminAccess();
+  }
+
+  Future<void> _checkAdminAccess() async {
+    final isAdmin = await _authService.isCurrentUserAdmin();
+    if (!isAdmin && mounted) {
+      // Not an admin, redirect to admin login
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const AdminLoginScreen()),
+      );
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        _isAdmin = isAdmin;
+        _isCheckingAuth = false;
+      });
+    }
   }
 
   Future<void> _handleLogout() async {
@@ -90,6 +111,24 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final isMobile = Breakpoints.isMobile(context);
+
+    // Show loading while checking admin access
+    if (_isCheckingAuth) {
+      return const Scaffold(
+        body: Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+
+    // This should never show as _checkAdminAccess redirects non-admins
+    if (!_isAdmin) {
+      return const Scaffold(
+        body: Center(
+          child: Text('Access Denied'),
+        ),
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(

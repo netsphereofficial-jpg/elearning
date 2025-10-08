@@ -15,11 +15,30 @@ class AdminAuthService {
   // Sign in with email and password (admin only)
   Future<UserModel?> signInWithEmailPassword(String email, String password) async {
     try {
-      // Sign in with Firebase Auth
-      final UserCredential result = await _auth.signInWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
+      UserCredential result;
+
+      // Try to sign in
+      try {
+        result = await _auth.signInWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+      } on FirebaseAuthException catch (e) {
+        // If user doesn't exist and it's an admin email, create it
+        if ((e.code == 'user-not-found' || e.code == 'invalid-credential') &&
+            _isAdminEmail(email)) {
+          print('Admin user not found. Creating admin account...');
+          result = await _auth.createUserWithEmailAndPassword(
+            email: email,
+            password: password,
+          );
+
+          // Create Firestore document immediately for new admin
+          await _createAdminFirestoreDocument(result.user!, email);
+        } else {
+          rethrow;
+        }
+      }
 
       final User? user = result.user;
       if (user == null) {
@@ -30,6 +49,13 @@ class AdminAuthService {
       final userDoc = await _firestore.collection('users').doc(user.uid).get();
 
       if (!userDoc.exists) {
+        // If Firestore doc doesn't exist but it's an admin email, create it
+        if (_isAdminEmail(email)) {
+          await _createAdminFirestoreDocument(user, email);
+          return await _firestore.collection('users').doc(user.uid).get().then(
+            (doc) => UserModel.fromFirestore(doc)
+          );
+        }
         await _auth.signOut();
         throw Exception('User not found');
       }
@@ -62,6 +88,8 @@ class AdminAuthService {
           throw Exception('No admin account found with this email.');
         case 'wrong-password':
           throw Exception('Incorrect password.');
+        case 'invalid-credential':
+          throw Exception('Invalid email or password. Please check your credentials.');
         case 'invalid-email':
           throw Exception('Invalid email format.');
         case 'user-disabled':
@@ -139,6 +167,37 @@ class AdminAuthService {
       }
     } catch (e) {
       print('Password reset error: $e');
+      rethrow;
+    }
+  }
+
+  // Check if email is an admin email
+  bool _isAdminEmail(String email) {
+    final adminEmails = [
+      'admin1@elearning.com',
+      'admin2@elearning.com',
+      'admin3@elearning.com',
+    ];
+    return adminEmails.contains(email.toLowerCase());
+  }
+
+  // Create admin Firestore document
+  Future<void> _createAdminFirestoreDocument(User user, String email) async {
+    try {
+      await _firestore.collection('users').doc(user.uid).set({
+        'email': email,
+        'name': email.split('@')[0].replaceAll('admin', 'Admin '),
+        'photoUrl': null,
+        'isPremium': false,
+        'role': 'admin',
+        'isBlocked': false,
+        'createdAt': FieldValue.serverTimestamp(),
+        'lastLoginAt': FieldValue.serverTimestamp(),
+        'maxConcurrentSessions': 2,
+      });
+      print('✅ Created admin Firestore document for $email');
+    } catch (e) {
+      print('Error creating admin Firestore document: $e');
       rethrow;
     }
   }

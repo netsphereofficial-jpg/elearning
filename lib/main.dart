@@ -44,7 +44,6 @@ class MyApp extends StatelessWidget {
           '/': (context) => const AuthWrapper(),
           '/admin': (context) => const AdminLoginScreen(),
         },
-        home: const AuthWrapper(),
       ),
     );
   }
@@ -69,7 +68,26 @@ class AuthWrapper extends StatelessWidget {
         }
 
         if (snapshot.hasData && snapshot.data != null) {
-          return const MainAppScreen();
+          // Check if the logged-in user is an admin
+          return FutureBuilder(
+            future: authService.getUserData(snapshot.data!.uid),
+            builder: (context, userSnapshot) {
+              if (userSnapshot.connectionState == ConnectionState.waiting) {
+                return const Scaffold(
+                  body: Center(
+                    child: CircularProgressIndicator(),
+                  ),
+                );
+              }
+
+              // If user is admin, sign them out from regular user flow
+              if (userSnapshot.hasData && userSnapshot.data!.isAdmin) {
+                return const GoogleSignInScreen();
+              }
+
+              return const MainAppScreen();
+            },
+          );
         }
 
         return const GoogleSignInScreen();
