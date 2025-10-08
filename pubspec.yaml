@@ -55,6 +55,9 @@ dependencies:
   # State Management
   provider: ^6.1.2
 
+  # Google Sign-In
+  google_sign_in: ^6.2.1
+
   # UI Utilities
   intl: ^0.20.0
   cached_network_image: ^3.4.1

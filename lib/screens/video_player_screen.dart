@@ -6,10 +6,8 @@ import 'dart:html' as html;
 // ignore: avoid_web_libraries_in_flutter
 import 'dart:ui_web' as ui_web;
 import '../models/video_model.dart';
-import '../services/auth_service.dart';
+import '../services/google_auth_service.dart';
 import '../services/video_service.dart';
-import '../widgets/watermark_overlay.dart';
-import '../widgets/security_overlay.dart';
 
 class VideoPlayerScreen extends StatefulWidget {
   final VideoModel video;
@@ -26,7 +24,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   bool _isLoading = true;
   bool _hasError = false;
   String? _errorMessage;
-  String? _userEmail;
   String _iframeViewType = '';
 
   Timer? _progressTimer;
@@ -41,7 +38,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
   Future<void> _initializePlayer() async {
     try {
-      final authService = context.read<AuthService>();
+      final authService = context.read<GoogleAuthService>();
       final user = authService.currentUser;
 
       if (user == null) {
@@ -52,9 +49,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         });
         return;
       }
-
-      // Get user email for watermark
-      _userEmail = user.email;
 
       // Bunny Stream iframe URL
       final bunnyVideoGuid = widget.video.bunnyVideoGuid;
@@ -145,23 +139,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                       width: double.infinity,
                       height: MediaQuery.of(context).size.height * 0.6,
                       color: Colors.black,
-                      child: Stack(
-                        children: [
-                          // Bunny iframe video player - fills entire container
-                          HtmlElementView(
-                            viewType: _iframeViewType,
-                          ),
-
-                          // Watermark overlay
-                          if (_userEmail != null)
-                            WatermarkOverlay(
-                              userEmail: _userEmail!,
-                              videoId: widget.video.id,
-                            ),
-
-                          // Security overlay
-                          const SecurityOverlay(),
-                        ],
+                      child: HtmlElementView(
+                        viewType: _iframeViewType,
                       ),
                     ),
 
