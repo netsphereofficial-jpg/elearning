@@ -248,6 +248,8 @@ class _ModernNavBarState extends State<ModernNavBar> {
           onSelected: (value) {
             if (value == 'logout') {
               _handleLogout();
+            } else if (value == 'admin') {
+              Navigator.of(context).pushNamed('/admin');
             }
           },
           itemBuilder: (context) => [
@@ -267,6 +269,17 @@ class _ModernNavBarState extends State<ModernNavBar> {
                       color: AppTheme.textSecondary,
                     ),
                   ),
+                ],
+              ),
+            ),
+            const PopupMenuDivider(),
+            const PopupMenuItem(
+              value: 'admin',
+              child: Row(
+                children: [
+                  Icon(Icons.admin_panel_settings, color: AppTheme.primaryColor, size: 20),
+                  SizedBox(width: AppTheme.spacingSM),
+                  Text('Admin Panel', style: TextStyle(color: AppTheme.primaryColor)),
                 ],
               ),
             ),
@@ -336,6 +349,18 @@ class _ModernNavBarState extends State<ModernNavBar> {
             }),
             const Divider(),
             ListTile(
+              leading: Icon(Icons.admin_panel_settings, color: AppTheme.primaryColor),
+              title: Text(
+                'Admin Panel',
+                style: TextStyle(color: AppTheme.primaryColor),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.of(context).pushNamed('/admin');
+              },
+            ),
+            const Divider(),
+            ListTile(
               leading: const Icon(Icons.logout, color: AppTheme.errorColor),
               title: const Text(
                 'Logout',
@@ -377,6 +402,18 @@ class _ModernNavBarState extends State<ModernNavBar> {
               style: AppTheme.bodyMD.copyWith(color: AppTheme.textSecondary),
             ),
             const SizedBox(height: AppTheme.spacingLG),
+            const Divider(),
+            ListTile(
+              leading: Icon(Icons.admin_panel_settings, color: AppTheme.primaryColor),
+              title: Text(
+                'Admin Panel',
+                style: TextStyle(color: AppTheme.primaryColor),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.of(context).pushNamed('/admin');
+              },
+            ),
             const Divider(),
             ListTile(
               leading: const Icon(Icons.logout, color: AppTheme.errorColor),

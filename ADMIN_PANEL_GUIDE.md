@@ -47,9 +47,18 @@ Password: Admin@123
 
 ### Step 2: Access Admin Panel
 
-**Web URL:** `http://localhost:PORT/#/admin` or create a dedicated route
+You have **3 ways** to access the admin panel:
 
-For now, access via the admin login screen directly.
+#### Option 1: URL Route (Recommended)
+Navigate to: `http://localhost:PORT/#/admin`
+
+#### Option 2: User Profile Menu (Desktop)
+1. Click your profile picture in the top-right navbar
+2. Click **"Admin Panel"** from the dropdown menu
+
+#### Option 3: Mobile Menu
+1. Click the hamburger menu (mobile)
+2. Click **"Admin Panel"** from the drawer
 
 ### Step 3: Test Admin Login
 

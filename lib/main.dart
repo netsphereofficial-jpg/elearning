@@ -7,6 +7,7 @@ import 'services/google_auth_service.dart';
 import 'services/init_service.dart';
 import 'screens/google_signin_screen.dart';
 import 'screens/main_app_screen.dart';
+import 'screens/admin/admin_login_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -38,6 +39,11 @@ class MyApp extends StatelessWidget {
         title: 'E-Learning Platform',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.lightTheme,
+        initialRoute: '/',
+        routes: {
+          '/': (context) => const AuthWrapper(),
+          '/admin': (context) => const AdminLoginScreen(),
+        },
         home: const AuthWrapper(),
       ),
     );
