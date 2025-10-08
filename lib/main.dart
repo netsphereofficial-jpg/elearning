@@ -3,16 +3,21 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
 import 'firebase_options.dart';
 import 'services/auth_service.dart';
+import 'services/init_service.dart';
 import 'screens/login_screen.dart';
 import 'screens/video_list_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize Firebase with your project configuration
+  // Initialize Firebase
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  // Initialize test video data
+  final initService = InitService();
+  await initService.initializeTestData();
 
   runApp(const MyApp());
 }

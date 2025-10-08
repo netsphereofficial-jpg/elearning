@@ -4,7 +4,7 @@ class VideoModel {
   final String id;
   final String title;
   final String description;
-  final String cloudflareVideoId;
+  final String bunnyVideoGuid; // Bunny.net video GUID
   final String thumbnailUrl;
   final int durationInSeconds;
   final String category;
@@ -12,12 +12,13 @@ class VideoModel {
   final DateTime uploadedAt;
   final int viewCount;
   final List<String> tags;
+  final String? processingStatus; // pending, processing, completed
 
   VideoModel({
     required this.id,
     required this.title,
     required this.description,
-    required this.cloudflareVideoId,
+    required this.bunnyVideoGuid,
     required this.thumbnailUrl,
     required this.durationInSeconds,
     required this.category,
@@ -25,6 +26,7 @@ class VideoModel {
     required this.uploadedAt,
     this.viewCount = 0,
     this.tags = const [],
+    this.processingStatus,
   });
 
   // Convert from Firestore document
@@ -34,7 +36,7 @@ class VideoModel {
       id: doc.id,
       title: data['title'] ?? '',
       description: data['description'] ?? '',
-      cloudflareVideoId: data['cloudflareVideoId'] ?? '',
+      bunnyVideoGuid: data['bunnyVideoGuid'] ?? data['cloudflareVideoId'] ?? '', // Support both for migration
       thumbnailUrl: data['thumbnailUrl'] ?? '',
       durationInSeconds: data['durationInSeconds'] ?? 0,
       category: data['category'] ?? 'General',
@@ -42,6 +44,7 @@ class VideoModel {
       uploadedAt: (data['uploadedAt'] as Timestamp).toDate(),
       viewCount: data['viewCount'] ?? 0,
       tags: List<String>.from(data['tags'] ?? []),
+      processingStatus: data['processingStatus'],
     );
   }
 
@@ -50,7 +53,7 @@ class VideoModel {
     return {
       'title': title,
       'description': description,
-      'cloudflareVideoId': cloudflareVideoId,
+      'bunnyVideoGuid': bunnyVideoGuid,
       'thumbnailUrl': thumbnailUrl,
       'durationInSeconds': durationInSeconds,
       'category': category,
@@ -58,6 +61,7 @@ class VideoModel {
       'uploadedAt': Timestamp.fromDate(uploadedAt),
       'viewCount': viewCount,
       'tags': tags,
+      'processingStatus': processingStatus,
     };
   }
 

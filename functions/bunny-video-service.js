@@ -6,24 +6,27 @@ const admin = require("firebase-admin");
 const axios = require("axios");
 const jwt = require("jsonwebtoken");
 
-// Initialize Firebase Admin
-admin.initializeApp();
+// Initialize Firebase Admin (if not already initialized)
+if (!admin.apps.length) {
+  admin.initializeApp();
+}
 
-// Set global options for all functions
+// Set global options
 setGlobalOptions({
   maxInstances: 10,
   region: "us-central1",
 });
 
-// Bunny.net Stream Configuration
-const BUNNY_LIBRARY_ID = process.env.BUNNY_LIBRARY_ID || "506127";
-const BUNNY_API_KEY = process.env.BUNNY_API_KEY || "fcb219ae-cdd0-4d5e-84bab396f607-ac7e-45c2";
-const BUNNY_CDN_HOSTNAME = process.env.BUNNY_CDN_HOSTNAME || "vz-d86440c8-58b.b-cdn.net";
+// Bunny.net Configuration
+// Set these via: firebase functions:config:set bunny.library_id="xxx" bunny.api_key="xxx"
+const BUNNY_LIBRARY_ID = process.env.BUNNY_LIBRARY_ID || "YOUR_LIBRARY_ID";
+const BUNNY_API_KEY = process.env.BUNNY_API_KEY || "YOUR_API_KEY";
+const BUNNY_CDN_HOSTNAME = process.env.BUNNY_CDN_HOSTNAME || "vz-xxxxx.b-cdn.net"; // From Bunny dashboard
 
 /**
  * Generate signed URL for Bunny Stream video
  */
-exports.generateSignedVideoUrl = onCall(async (request) => {
+exports.generateSignedVideoUrlBunny = onCall(async (request) => {
   try {
     // Check authentication
     if (!request.auth) {
@@ -76,12 +79,13 @@ exports.generateSignedVideoUrl = onCall(async (request) => {
     const bunnyVideoGuid = videoData.bunnyVideoGuid;
 
     if (!bunnyVideoGuid) {
-      throw new Error("Video not properly configured in Bunny Stream.");
+      throw new Error("Video not properly configured.");
     }
 
-    // Generate token for additional security
+    // Generate token-protected URL
     const expirationTime = Math.floor(Date.now() / 1000) + 4 * 60 * 60; // 4 hours
 
+    // Create JWT token for additional security
     const token = jwt.sign(
       {
         userId: userId,
@@ -92,7 +96,8 @@ exports.generateSignedVideoUrl = onCall(async (request) => {
       process.env.JWT_SECRET || "your-secret-key-change-this"
     );
 
-    // Bunny Stream HLS URL format
+    // Bunny Stream URL format (with token protection if enabled in Bunny dashboard)
+    // Standard format: https://vz-xxxxx.b-cdn.net/{videoGuid}/playlist.m3u8
     const signedUrl = `https://${BUNNY_CDN_HOSTNAME}/${bunnyVideoGuid}/playlist.m3u8`;
 
     // Log the access
@@ -136,18 +141,17 @@ exports.uploadVideoToBunny = onCall(async (request) => {
       throw new Error("User does not have admin privileges.");
     }
 
-    const { title, collectionId } = request.data;
+    const { videoUrl, title, description, category } = request.data;
 
-    if (!title) {
-      throw new Error("Title is required.");
+    if (!videoUrl || !title) {
+      throw new Error("Video URL and title are required.");
     }
 
-    // Create video in Bunny Stream
+    // Create video in Bunny Stream via their API
     const response = await axios.post(
       `https://video.bunnycdn.com/library/${BUNNY_LIBRARY_ID}/videos`,
       {
         title: title,
-        collectionId: collectionId || "",
       },
       {
         headers: {
@@ -160,42 +164,65 @@ exports.uploadVideoToBunny = onCall(async (request) => {
     const bunnyVideoGuid = response.data.guid;
     const bunnyVideoId = response.data.videoLibraryId;
 
+    // Upload video file from URL
+    await axios.put(
+      `https://video.bunnycdn.com/library/${BUNNY_LIBRARY_ID}/videos/${bunnyVideoGuid}`,
+      {
+        videoUrl: videoUrl,
+      },
+      {
+        headers: {
+          AccessKey: BUNNY_API_KEY,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    // Get video details (after processing starts)
+    const videoDetails = await axios.get(
+      `https://video.bunnycdn.com/library/${BUNNY_LIBRARY_ID}/videos/${bunnyVideoGuid}`,
+      {
+        headers: {
+          AccessKey: BUNNY_API_KEY,
+        },
+      }
+    );
+
     // Create video document in Firestore
     const videoRef = await admin
       .firestore()
       .collection("videos")
       .add({
         title: title,
-        description: "",
+        description: description || "",
         bunnyVideoGuid: bunnyVideoGuid,
         bunnyVideoId: bunnyVideoId,
         thumbnailUrl: `https://${BUNNY_CDN_HOSTNAME}/${bunnyVideoGuid}/thumbnail.jpg`,
-        category: "General",
+        category: category || "General",
         isPremium: false,
         uploadedAt: admin.firestore.FieldValue.serverTimestamp(),
         viewCount: 0,
         tags: [],
-        durationInSeconds: 0,
-        processingStatus: "pending",
+        durationInSeconds: 0, // Will be updated after Bunny processes the video
+        processingStatus: "processing",
       });
 
     return {
       success: true,
       videoId: videoRef.id,
       bunnyVideoGuid: bunnyVideoGuid,
-      uploadUrl: `https://video.bunnycdn.com/library/${BUNNY_LIBRARY_ID}/videos/${bunnyVideoGuid}`,
-      message: "Video created. You can now upload the file via Bunny dashboard or API.",
+      message: "Video is being processed. This may take 5-30 minutes.",
     };
   } catch (error) {
-    console.error("Error creating video in Bunny:", error);
-    throw new Error(`Failed to create video: ${error.message}`);
+    console.error("Error uploading video to Bunny:", error);
+    throw new Error(`Failed to upload video: ${error.message}`);
   }
 });
 
 /**
  * Check video processing status
  */
-exports.checkVideoStatus = onCall(async (request) => {
+exports.checkBunnyVideoStatus = onCall(async (request) => {
   try {
     if (!request.auth) {
       throw new Error("User must be authenticated.");
@@ -225,8 +252,8 @@ exports.checkVideoStatus = onCall(async (request) => {
     const status = response.data;
 
     // Update Firestore if processing is complete
-    if (status.status === 4 || status.status === 5) {
-      // 4 = Transcoding, 5 = Finished
+    if (status.status === 4) {
+      // 4 = Finished
       await admin.firestore().collection("videos").doc(videoId).update({
         processingStatus: "completed",
         durationInSeconds: status.length || 0,
@@ -234,11 +261,11 @@ exports.checkVideoStatus = onCall(async (request) => {
     }
 
     return {
-      status: status.status, // Status codes: 0-6
+      status: status.status, // 0=Queued, 1=Processing, 2=Encoding, 3=Finished, 4=Ready
       progress: status.encodeProgress || 0,
       duration: status.length || 0,
-      availableResolutions: status.availableResolutions || [],
-      message: status.status === 5 ? "Ready to stream" : "Processing...",
+      message:
+        status.status === 4 ? "Ready to stream" : "Processing...",
     };
   } catch (error) {
     console.error("Error checking video status:", error);
@@ -276,7 +303,7 @@ exports.validateVideoToken = onCall(async (request) => {
 });
 
 /**
- * Clean up expired sessions (runs every hour)
+ * Clean up expired sessions
  */
 exports.cleanupExpiredSessions = onSchedule("every 1 hours", async (event) => {
   const expirationTime = new Date(Date.now() - 4 * 60 * 60 * 1000);
