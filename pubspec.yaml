@@ -44,6 +44,7 @@ dependencies:
   # Video Player
   video_player: ^2.9.2
   chewie: ^1.8.5
+  video_player_web_hls: ^1.3.0
 
   # HTTP & Networking
   http: ^1.2.2

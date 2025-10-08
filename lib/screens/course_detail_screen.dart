@@ -4,9 +4,10 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../models/course_model.dart';
 import '../services/course_service.dart';
 import '../services/google_auth_service.dart';
+import '../services/course_progress_service.dart';
 import 'payment_screen.dart';
-import 'video_player_screen.dart';
-import '../models/video_model.dart';
+import 'course_video_player_screen.dart';
+import '../constants/app_theme.dart';
 
 class CourseDetailScreen extends StatefulWidget {
   final CourseModel course;
@@ -19,8 +20,11 @@ class CourseDetailScreen extends StatefulWidget {
 
 class _CourseDetailScreenState extends State<CourseDetailScreen> {
   final CourseService _courseService = CourseService();
+  final CourseProgressService _progressService = CourseProgressService();
   bool _isEnrolled = false;
   bool _isCheckingEnrollment = true;
+  List<String> _completedVideoIds = [];
+  Map<String, bool> _videoUnlockStatus = {};
 
   @override
   void initState() {
@@ -37,6 +41,26 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
 
       if (userId != null) {
         final enrolled = await _courseService.isUserEnrolled(userId, widget.course.id);
+
+        // Load completed videos
+        if (enrolled) {
+          _completedVideoIds = await _progressService.getCompletedVideoIds(userId, widget.course.id);
+
+          // Check unlock status for all videos
+          final allVideoIds = widget.course.videos.map((v) => v.videoId).toList();
+          for (var video in widget.course.videos) {
+            final isUnlocked = await _progressService.isVideoUnlocked(
+              userId: userId,
+              courseId: widget.course.id,
+              videoId: video.videoId,
+              videoOrder: video.order,
+              isFree: video.isFree,
+              allVideoIds: allVideoIds,
+            );
+            _videoUnlockStatus[video.videoId] = isUnlocked;
+          }
+        }
+
         setState(() {
           _isEnrolled = enrolled;
           _isCheckingEnrollment = false;
@@ -66,44 +90,51 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
   }
 
   void _playVideo(CourseVideo video) {
-    // Convert CourseVideo to VideoModel for compatibility with existing player
-    final videoModel = VideoModel(
-      id: video.videoId,
-      title: video.title,
-      description: video.description,
-      bunnyVideoGuid: video.bunnyVideoGuid,
-      thumbnailUrl: video.thumbnailUrl,
-      durationInSeconds: video.durationInSeconds,
-      category: widget.course.title,
-      uploadedAt: widget.course.createdAt,
-      tags: [],
-    );
-
+    // Use new CourseVideoPlayerScreen with seek restrictions
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => VideoPlayerScreen(video: videoModel),
+        builder: (_) => CourseVideoPlayerScreen(
+          video: video,
+          courseId: widget.course.id,
+          courseTitle: widget.course.title,
+          videoDuration: video.durationInSeconds,
+        ),
       ),
-    );
+    ).then((_) {
+      // Refresh enrollment and progress when returning
+      _checkEnrollment();
+    });
   }
 
-  void _showLockedDialog() {
+  void _showLockedDialog({required bool isEnrollmentLocked}) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Content Locked'),
-        content: const Text('Please enroll in this course to access all videos.'),
+        title: Row(
+          children: [
+            Icon(Icons.lock, color: AppTheme.warningColor),
+            const SizedBox(width: 8),
+            const Text('Content Locked'),
+          ],
+        ),
+        content: Text(
+          isEnrollmentLocked
+              ? 'Please enroll in this course to access all videos.'
+              : 'Please complete the previous videos first to unlock this video.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
             child: const Text('Cancel'),
           ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              _navigateToPayment();
-            },
-            child: const Text('Enroll Now'),
-          ),
+          if (isEnrollmentLocked)
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _navigateToPayment();
+              },
+              child: const Text('Enroll Now'),
+            ),
         ],
       ),
     );
@@ -267,7 +298,10 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
   }
 
   Widget _buildVideoListItem(CourseVideo video) {
-    final isLocked = !video.isFree && !_isEnrolled;
+    final isEnrollmentLocked = !video.isFree && !_isEnrolled;
+    final isCompleted = _completedVideoIds.contains(video.videoId);
+    final isUnlocked = _videoUnlockStatus[video.videoId] ?? video.isFree;
+    final isSequentiallyLocked = _isEnrolled && !isUnlocked;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
@@ -279,13 +313,32 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
             borderRadius: BorderRadius.circular(8),
             color: Colors.grey[300],
           ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: CachedNetworkImage(
-              imageUrl: video.thumbnailUrl,
-              fit: BoxFit.cover,
-              errorWidget: (context, url, error) => const Icon(Icons.play_circle_outline),
-            ),
+          child: Stack(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: CachedNetworkImage(
+                  imageUrl: video.thumbnailUrl,
+                  fit: BoxFit.cover,
+                  width: double.infinity,
+                  height: double.infinity,
+                  errorWidget: (context, url, error) => const Icon(Icons.play_circle_outline),
+                ),
+              ),
+              if (isCompleted)
+                Positioned(
+                  top: 4,
+                  right: 4,
+                  child: Container(
+                    padding: const EdgeInsets.all(2),
+                    decoration: const BoxDecoration(
+                      color: Colors.green,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.check, color: Colors.white, size: 16),
+                  ),
+                ),
+            ],
           ),
         ),
         title: Row(
@@ -307,24 +360,65 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
                   ),
                 ),
               ),
+            if (isCompleted)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                margin: const EdgeInsets.only(right: 8),
+                decoration: BoxDecoration(
+                  color: AppTheme.successColor,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: const Text(
+                  'DONE',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
             Expanded(
               child: Text(
                 '${video.order}. ${video.title}',
-                style: const TextStyle(fontWeight: FontWeight.w500),
+                style: TextStyle(
+                  fontWeight: FontWeight.w500,
+                  color: (isEnrollmentLocked || isSequentiallyLocked) ? Colors.grey : null,
+                ),
               ),
             ),
           ],
         ),
-        subtitle: Text(
-          video.formattedDuration,
-          style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              video.formattedDuration,
+              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            ),
+            if (isSequentiallyLocked)
+              Padding(
+                padding: const EdgeInsets.only(top: 4.0),
+                child: Text(
+                  'Complete previous videos to unlock',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: AppTheme.warningColor,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ),
+          ],
         ),
-        trailing: isLocked
-            ? const Icon(Icons.lock, color: Colors.grey)
-            : Icon(Icons.play_circle_filled, color: Theme.of(context).colorScheme.primary),
+        trailing: isEnrollmentLocked || isSequentiallyLocked
+            ? Icon(Icons.lock, color: isSequentiallyLocked ? AppTheme.warningColor : Colors.grey)
+            : (isCompleted
+                ? Icon(Icons.check_circle, color: AppTheme.successColor)
+                : Icon(Icons.play_circle_filled, color: Theme.of(context).colorScheme.primary)),
         onTap: () {
-          if (isLocked) {
-            _showLockedDialog();
+          if (isEnrollmentLocked) {
+            _showLockedDialog(isEnrollmentLocked: true);
+          } else if (isSequentiallyLocked) {
+            _showLockedDialog(isEnrollmentLocked: false);
           } else {
             _playVideo(video);
           }

@@ -6,6 +6,7 @@ import 'dashboard_overview_screen.dart';
 import 'courses_list_screen.dart';
 import 'payments_list_screen.dart';
 import 'users_list_screen.dart';
+import 'settings_screen.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -41,6 +42,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       label: 'Users',
       description: 'User Management',
     ),
+    _NavItem(
+      icon: Icons.settings,
+      label: 'Settings',
+      description: 'Payment Settings',
+    ),
   ];
 
   late final List<Widget> _screens;
@@ -53,6 +59,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       const CoursesListScreen(),
       const PaymentsListScreen(),
       const UsersListScreen(),
+      const SettingsScreen(),
     ];
     _checkAdminAccess();
   }

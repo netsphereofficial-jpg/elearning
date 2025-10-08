@@ -109,6 +109,7 @@ class VideoService {
     required int currentPosition,
     required int totalWatchTime,
     required String deviceId,
+    int? maxWatchedPosition,
     String? ipAddress,
   }) async {
     try {
@@ -122,6 +123,7 @@ class VideoService {
         'userId': userId,
         'videoId': videoId,
         'lastWatchedPosition': currentPosition,
+        if (maxWatchedPosition != null) 'maxWatchedPosition': maxWatchedPosition,
         'lastWatchedAt': FieldValue.serverTimestamp(),
         'totalWatchTime': totalWatchTime,
         'deviceId': deviceId,

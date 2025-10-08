@@ -5,6 +5,7 @@ class WatchSessionModel {
   final String userId;
   final String videoId;
   final int lastWatchedPosition; // in seconds
+  final int maxWatchedPosition; // furthest point user has reached (in seconds)
   final bool isCompleted;
   final DateTime lastWatchedAt;
   final DateTime? completedAt;
@@ -17,6 +18,7 @@ class WatchSessionModel {
     required this.userId,
     required this.videoId,
     this.lastWatchedPosition = 0,
+    this.maxWatchedPosition = 0,
     this.isCompleted = false,
     required this.lastWatchedAt,
     this.completedAt,
@@ -33,6 +35,7 @@ class WatchSessionModel {
       userId: data['userId'] ?? '',
       videoId: data['videoId'] ?? '',
       lastWatchedPosition: data['lastWatchedPosition'] ?? 0,
+      maxWatchedPosition: data['maxWatchedPosition'] ?? data['lastWatchedPosition'] ?? 0,
       isCompleted: data['isCompleted'] ?? false,
       lastWatchedAt: (data['lastWatchedAt'] as Timestamp).toDate(),
       completedAt: data['completedAt'] != null
@@ -50,6 +53,7 @@ class WatchSessionModel {
       'userId': userId,
       'videoId': videoId,
       'lastWatchedPosition': lastWatchedPosition,
+      'maxWatchedPosition': maxWatchedPosition,
       'isCompleted': isCompleted,
       'lastWatchedAt': Timestamp.fromDate(lastWatchedAt),
       'completedAt': completedAt != null ? Timestamp.fromDate(completedAt!) : null,
@@ -65,12 +69,16 @@ class WatchSessionModel {
     return (lastWatchedPosition / videoDuration).clamp(0.0, 1.0);
   }
 
+  // Check if user can seek freely (after completion)
+  bool get canSeekFreely => isCompleted;
+
   // CopyWith method
   WatchSessionModel copyWith({
     String? id,
     String? userId,
     String? videoId,
     int? lastWatchedPosition,
+    int? maxWatchedPosition,
     bool? isCompleted,
     DateTime? lastWatchedAt,
     DateTime? completedAt,
@@ -83,6 +91,7 @@ class WatchSessionModel {
       userId: userId ?? this.userId,
       videoId: videoId ?? this.videoId,
       lastWatchedPosition: lastWatchedPosition ?? this.lastWatchedPosition,
+      maxWatchedPosition: maxWatchedPosition ?? this.maxWatchedPosition,
       isCompleted: isCompleted ?? this.isCompleted,
       lastWatchedAt: lastWatchedAt ?? this.lastWatchedAt,
       completedAt: completedAt ?? this.completedAt,
