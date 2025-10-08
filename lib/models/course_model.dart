@@ -69,6 +69,7 @@ class CourseModel {
   final String description;
   final String thumbnailUrl;
   final int price;
+  final int validityDays; // Number of days course is valid after enrollment
   final DateTime createdAt;
   final bool isPublished;
   final List<CourseVideo> videos;
@@ -79,6 +80,7 @@ class CourseModel {
     required this.description,
     required this.thumbnailUrl,
     required this.price,
+    this.validityDays = 30, // Default 30 days
     required this.createdAt,
     this.isPublished = true,
     this.videos = const [],
@@ -103,6 +105,7 @@ class CourseModel {
       description: data['description'] ?? '',
       thumbnailUrl: data['thumbnailUrl'] ?? '',
       price: data['price'] ?? 0,
+      validityDays: data['validityDays'] ?? 30,
       createdAt: (data['createdAt'] as Timestamp).toDate(),
       isPublished: data['isPublished'] ?? true,
       videos: videosList,
@@ -116,6 +119,7 @@ class CourseModel {
       'description': description,
       'thumbnailUrl': thumbnailUrl,
       'price': price,
+      'validityDays': validityDays,
       'createdAt': Timestamp.fromDate(createdAt),
       'isPublished': isPublished,
       'videos': videos.map((video) => video.toMap()).toList(),

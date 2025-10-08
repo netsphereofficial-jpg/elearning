@@ -35,21 +35,67 @@ class CourseService {
     }
   }
 
-  // Check if user is enrolled in a course
+  // Check if user is enrolled in a course and enrollment is still valid
   Future<bool> isUserEnrolled(String userId, String courseId) async {
     try {
       final snapshot = await _firestore
           .collection('enrollments')
           .where('userId', isEqualTo: userId)
           .where('courseId', isEqualTo: courseId)
-          .where('status', isEqualTo: 'completed')
+          .where('status', isEqualTo: 'approved') // Changed from 'completed' to 'approved'
           .limit(1)
           .get();
 
-      return snapshot.docs.isNotEmpty;
+      if (snapshot.docs.isEmpty) {
+        return false;
+      }
+
+      // Check if enrollment is still valid (not expired)
+      final enrollment = EnrollmentModel.fromFirestore(snapshot.docs.first);
+      return enrollment.isValid; // Uses the isValid getter which checks expiry
     } catch (e) {
       print('Error checking enrollment: $e');
       return false;
+    }
+  }
+
+  // Check enrollment status (approved, pending, rejected, expired)
+  Future<String> checkEnrollmentStatus(String userId, String courseId) async {
+    try {
+      final snapshot = await _firestore
+          .collection('enrollments')
+          .where('userId', isEqualTo: userId)
+          .where('courseId', isEqualTo: courseId)
+          .orderBy('enrolledAt', descending: true)
+          .limit(1)
+          .get();
+
+      if (snapshot.docs.isEmpty) {
+        return 'not_enrolled';
+      }
+
+      final enrollment = EnrollmentModel.fromFirestore(snapshot.docs.first);
+
+      if (enrollment.status == 'pending') {
+        return 'pending';
+      }
+
+      if (enrollment.status == 'rejected') {
+        return 'rejected';
+      }
+
+      if (enrollment.status == 'approved') {
+        if (enrollment.isValid) {
+          return 'active';
+        } else {
+          return 'expired';
+        }
+      }
+
+      return 'not_enrolled';
+    } catch (e) {
+      print('Error checking enrollment status: $e');
+      return 'error';
     }
   }
 
@@ -70,7 +116,7 @@ class CourseService {
       final snapshot = await _firestore
           .collection('enrollments')
           .where('userId', isEqualTo: userId)
-          .where('status', isEqualTo: 'completed')
+          .where('status', isEqualTo: 'approved') // Changed from 'completed' to 'approved'
           .orderBy('enrolledAt', descending: true)
           .get();
 

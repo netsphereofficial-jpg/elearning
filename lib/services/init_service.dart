@@ -3,11 +3,12 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 class InitService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  // Initialize app with test course and payment settings
+  // Initialize app with test course, payment settings, and admin note
   Future<void> initializeTestData() async {
     try {
       await _initializeSampleCourse();
       await _initializePaymentSettings();
+      await _initializeAdminNote();
     } catch (e) {
       print('Error initializing test data: $e');
     }
@@ -28,6 +29,7 @@ class InitService {
           'description': 'Master Flutter development from basics to advanced. Build beautiful, cross-platform mobile and web applications with hands-on projects and real-world examples.',
           'thumbnailUrl': 'https://images.unsplash.com/photo-1516397281156-ca07cf9746fc?w=800',
           'price': 999,
+          'validityDays': 30, // Course valid for 30 days after enrollment
           'isPublished': true,
           'createdAt': FieldValue.serverTimestamp(),
           'videos': [
@@ -163,6 +165,65 @@ class InitService {
       }
     } catch (e) {
       print('Error creating payment settings: $e');
+    }
+  }
+
+  // Create admin setup instructions
+  Future<void> _initializeAdminNote() async {
+    try {
+      final adminDoc = await _firestore.collection('settings').doc('admin').get();
+
+      if (!adminDoc.exists) {
+        print('Creating admin setup instructions...');
+
+        await _firestore.collection('settings').doc('admin').set({
+          'setupInstructions': '''
+ADMIN SETUP REQUIRED:
+
+Create 3 admin accounts manually in Firebase Console:
+
+1. Go to Firebase Console → Authentication → Users
+2. Click "Add User" and create these accounts:
+
+   Admin 1:
+   Email: admin1@elearning.com
+   Password: Admin@123
+
+   Admin 2:
+   Email: admin2@elearning.com
+   Password: Admin@123
+
+   Admin 3:
+   Email: admin3@elearning.com
+   Password: Admin@123
+
+3. After creating the auth accounts, update the Firestore users collection:
+   - For each admin user document, add/update:
+     role: "admin"
+     isBlocked: false
+
+Admin Panel Access:
+- Web: http://localhost:PORT/#/admin
+- These admins can log in via the admin login screen
+''',
+          'adminEmails': [
+            'admin1@elearning.com',
+            'admin2@elearning.com',
+            'admin3@elearning.com',
+          ],
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+
+        print('✅ Admin setup instructions created!');
+        print('');
+        print('⚠️  IMPORTANT: Create admin accounts in Firebase Console');
+        print('   Emails: admin1@elearning.com, admin2@elearning.com, admin3@elearning.com');
+        print('   Password for all: Admin@123');
+      } else {
+        print('Admin setup instructions already exist');
+      }
+    } catch (e) {
+      print('Error creating admin setup instructions: $e');
     }
   }
 }
