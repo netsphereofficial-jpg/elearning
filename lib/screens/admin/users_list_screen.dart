@@ -12,13 +12,37 @@ class UsersListScreen extends StatefulWidget {
 
 class _UsersListScreenState extends State<UsersListScreen> {
   final AdminUserService _userService = AdminUserService();
+  final TextEditingController _searchController = TextEditingController();
   List<UserModel> _users = [];
+  List<UserModel> _filteredUsers = [];
   bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
     _loadUsers();
+    _searchController.addListener(_filterUsers);
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _filterUsers() {
+    final query = _searchController.text.toLowerCase();
+    setState(() {
+      if (query.isEmpty) {
+        _filteredUsers = _users;
+      } else {
+        _filteredUsers = _users.where((user) {
+          return user.name.toLowerCase().contains(query) ||
+              user.email.toLowerCase().contains(query) ||
+              user.role.name.toLowerCase().contains(query);
+        }).toList();
+      }
+    });
   }
 
   Future<void> _loadUsers() async {
@@ -27,6 +51,7 @@ class _UsersListScreenState extends State<UsersListScreen> {
       final users = await _userService.getAllUsers();
       setState(() {
         _users = users;
+        _filteredUsers = users;
         _isLoading = false;
       });
     } catch (e) {
@@ -95,12 +120,74 @@ class _UsersListScreenState extends State<UsersListScreen> {
                 const Divider(height: AppTheme.spacingLG),
                 Text('Enrollments (${enrollments.length})', style: AppTheme.titleMD),
                 const SizedBox(height: AppTheme.spacingSM),
-                ...enrollments.map((e) => Chip(
-                      label: Text(e.courseTitle),
-                      backgroundColor: e.status == 'approved'
-                          ? AppTheme.successColor.withOpacity(0.1)
-                          : Colors.grey[300],
-                    )),
+                ...enrollments.map((e) {
+                  // Determine enrollment status
+                  Color chipColor;
+                  IconData statusIcon;
+                  String statusText;
+
+                  if (e.status != 'approved') {
+                    chipColor = Colors.grey;
+                    statusIcon = Icons.pending;
+                    statusText = e.status.toUpperCase();
+                  } else if (e.isValid) {
+                    chipColor = const Color(0xFF10B981); // Green
+                    statusIcon = Icons.check_circle;
+                    statusText = 'LIVE';
+                    if (e.isExpiringSoon) {
+                      chipColor = const Color(0xFFF59E0B); // Orange
+                      statusIcon = Icons.warning;
+                      statusText = 'EXPIRING SOON';
+                    }
+                  } else {
+                    chipColor = const Color(0xFFEF4444); // Red
+                    statusIcon = Icons.cancel;
+                    statusText = 'EXPIRED';
+                  }
+
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: AppTheme.spacingSM),
+                    child: Container(
+                      padding: const EdgeInsets.all(AppTheme.spacingSM),
+                      decoration: BoxDecoration(
+                        color: chipColor.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(AppTheme.radiusSM),
+                        border: Border.all(color: chipColor.withOpacity(0.3)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  e.courseTitle,
+                                  style: AppTheme.bodyMD.copyWith(fontWeight: FontWeight.w600),
+                                ),
+                              ),
+                              Icon(statusIcon, size: 16, color: chipColor),
+                              const SizedBox(width: 4),
+                              Text(
+                                statusText,
+                                style: AppTheme.bodySM.copyWith(
+                                  color: chipColor,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                          if (e.validUntil != null) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              'Valid until: ${_formatDate(e.validUntil!)}',
+                              style: AppTheme.bodySM.copyWith(color: AppTheme.textSecondary),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  );
+                }),
               ],
             ),
           ),
@@ -125,6 +212,8 @@ class _UsersListScreenState extends State<UsersListScreen> {
             const Expanded(child: Center(child: CircularProgressIndicator()))
           else if (_users.isEmpty)
             const Expanded(child: Center(child: Text('No users found')))
+          else if (_filteredUsers.isEmpty)
+            const Expanded(child: Center(child: Text('No users match your search')))
           else
             Expanded(child: _buildUsersList()),
         ],
@@ -133,20 +222,61 @@ class _UsersListScreenState extends State<UsersListScreen> {
   }
 
   Widget _buildHeader() {
+    final isMobile = Breakpoints.isMobile(context);
+
     return Container(
       padding: const EdgeInsets.all(AppTheme.spacingLG),
       decoration: BoxDecoration(
         color: Colors.white,
         border: Border(bottom: BorderSide(color: AppTheme.borderColor)),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Users (${_users.length})', style: AppTheme.titleLG),
-          const Spacer(),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadUsers,
+          Row(
+            children: [
+              Text('Users (${_users.length})', style: AppTheme.titleLG),
+              const Spacer(),
+              IconButton(
+                icon: const Icon(Icons.refresh),
+                onPressed: _loadUsers,
+              ),
+            ],
           ),
+          const SizedBox(height: AppTheme.spacingMD),
+          SizedBox(
+            width: isMobile ? double.infinity : 400,
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: 'Search by name, email, or role...',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _searchController.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: () {
+                          _searchController.clear();
+                        },
+                      )
+                    : null,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(AppTheme.radiusMD),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: AppTheme.spacingMD,
+                  vertical: AppTheme.spacingSM,
+                ),
+              ),
+            ),
+          ),
+          if (_searchController.text.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: AppTheme.spacingSM),
+              child: Text(
+                'Showing ${_filteredUsers.length} of ${_users.length} users',
+                style: AppTheme.bodySM.copyWith(color: AppTheme.textSecondary),
+              ),
+            ),
         ],
       ),
     );
@@ -155,9 +285,9 @@ class _UsersListScreenState extends State<UsersListScreen> {
   Widget _buildUsersList() {
     return ListView.builder(
       padding: const EdgeInsets.all(AppTheme.spacingMD),
-      itemCount: _users.length,
+      itemCount: _filteredUsers.length,
       itemBuilder: (context, index) {
-        final user = _users[index];
+        final user = _filteredUsers[index];
         return Card(
           margin: const EdgeInsets.only(bottom: AppTheme.spacingMD),
           child: ListTile(

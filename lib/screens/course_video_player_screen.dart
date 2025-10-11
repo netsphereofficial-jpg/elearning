@@ -105,8 +105,9 @@ class _CourseVideoPlayerScreenState extends State<CourseVideoPlayerScreen> {
       // Add listener for position tracking and seek restrictions
       _videoPlayerController!.addListener(_onVideoPositionChanged);
 
-      // Start from last watched position
-      if (_currentPosition > 0 && _currentPosition < widget.videoDuration) {
+      // Start from last watched position (but only if not completed)
+      // For completed videos, user can watch from anywhere they prefer
+      if (!_isCompleted && _currentPosition > 0 && _currentPosition < widget.videoDuration) {
         await _videoPlayerController!.seekTo(Duration(seconds: _currentPosition));
       }
 
@@ -133,12 +134,13 @@ class _CourseVideoPlayerScreenState extends State<CourseVideoPlayerScreen> {
 
     _currentPosition = positionSeconds;
 
-    // Update max watched position if user progressed forward
-    if (positionSeconds > _maxWatchedPosition) {
+    // Update max watched position if user progressed forward (only for first-time viewing)
+    if (!_isCompleted && positionSeconds > _maxWatchedPosition) {
       _maxWatchedPosition = positionSeconds;
     }
 
-    // SEEK RESTRICTION: Prevent fast-forward if not completed
+    // SEEK RESTRICTION: Prevent fast-forward ONLY on first-time viewing (not completed)
+    // If video was previously completed, user can skip/fast-forward freely
     if (!_isCompleted && !_isSeekRestrictionActive && positionSeconds > _maxWatchedPosition + 2) {
       _isSeekRestrictionActive = true;
       print('⚠️ Seeking ahead blocked! Rewinding to max position: $_maxWatchedPosition');
@@ -148,7 +150,7 @@ class _CourseVideoPlayerScreenState extends State<CourseVideoPlayerScreen> {
       _showSeekBlockedMessage();
     }
 
-    // Check for completion (95% watched)
+    // Check for completion (95% watched) - only mark if not already completed
     if (!_isCompleted && positionSeconds >= widget.videoDuration * 0.95) {
       _markVideoCompleted();
     }
@@ -300,7 +302,7 @@ class _CourseVideoPlayerScreenState extends State<CourseVideoPlayerScreen> {
                               ),
                       ),
 
-                      // Seek restriction warning banner
+                      // Seek restriction warning banner (only for first-time viewing)
                       if (!_isCompleted)
                         Container(
                           width: double.infinity,
@@ -320,6 +322,35 @@ class _CourseVideoPlayerScreenState extends State<CourseVideoPlayerScreen> {
                                   'First-time watch: Skipping ahead is disabled until you complete the video',
                                   style: TextStyle(
                                     color: AppTheme.warningColor,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                      // Info banner for completed videos (re-watching)
+                      if (_isCompleted)
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: AppTheme.successColor.withOpacity(0.2),
+                            border: Border(
+                              bottom: BorderSide(color: AppTheme.successColor, width: 2),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.check_circle_outline, color: AppTheme.successColor, size: 20),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  'You\'ve completed this video. You can now skip and fast-forward freely!',
+                                  style: TextStyle(
+                                    color: AppTheme.successColor,
                                     fontSize: 12,
                                     fontWeight: FontWeight.w500,
                                   ),

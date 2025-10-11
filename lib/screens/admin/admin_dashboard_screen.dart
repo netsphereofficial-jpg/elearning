@@ -7,6 +7,8 @@ import 'courses_list_screen.dart';
 import 'payments_list_screen.dart';
 import 'users_list_screen.dart';
 import 'settings_screen.dart';
+import 'manual_enrollment_screen.dart';
+import 'enrollments_list_screen.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -43,6 +45,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       description: 'User Management',
     ),
     _NavItem(
+      icon: Icons.assignment,
+      label: 'Enrollments',
+      description: 'Live & Expired',
+    ),
+    _NavItem(
+      icon: Icons.person_add,
+      label: 'Enroll Users',
+      description: 'Manual Enrollment',
+    ),
+    _NavItem(
       icon: Icons.settings,
       label: 'Settings',
       description: 'Payment Settings',
@@ -59,6 +71,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       const CoursesListScreen(),
       const PaymentsListScreen(),
       const UsersListScreen(),
+      const EnrollmentsListScreen(),
+      const ManualEnrollmentScreen(),
       const SettingsScreen(),
     ];
     _checkAdminAccess();

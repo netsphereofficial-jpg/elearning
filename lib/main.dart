@@ -16,7 +16,7 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
-
+//XLDynamics
   // Initialize test course data and payment settings
   final initService = InitService();
   await initService.initializeTestData();

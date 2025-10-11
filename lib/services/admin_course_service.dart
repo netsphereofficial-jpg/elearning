@@ -45,13 +45,10 @@ class AdminCourseService {
     }
   }
 
-  // Delete course (soft delete by unpublishing)
+  // Delete course (hard delete - permanently removes from database)
   Future<bool> deleteCourse(String courseId) async {
     try {
-      await _firestore.collection('courses').doc(courseId).update({
-        'isPublished': false,
-        'deletedAt': FieldValue.serverTimestamp(),
-      });
+      await _firestore.collection('courses').doc(courseId).delete();
       print('Course deleted: $courseId');
       return true;
     } catch (e) {

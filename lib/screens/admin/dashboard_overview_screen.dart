@@ -3,6 +3,7 @@ import '../../constants/app_theme.dart';
 import '../../services/admin_course_service.dart';
 import '../../services/admin_payment_service.dart';
 import '../../services/admin_user_service.dart';
+import '../../services/admin_enrollment_service.dart';
 
 class DashboardOverviewScreen extends StatefulWidget {
   const DashboardOverviewScreen({super.key});
@@ -15,6 +16,7 @@ class _DashboardOverviewScreenState extends State<DashboardOverviewScreen> {
   final AdminCourseService _courseService = AdminCourseService();
   final AdminPaymentService _paymentService = AdminPaymentService();
   final AdminUserService _userService = AdminUserService();
+  final AdminEnrollmentService _enrollmentService = AdminEnrollmentService();
 
   bool _isLoading = true;
   Map<String, dynamic> _stats = {};
@@ -34,6 +36,7 @@ class _DashboardOverviewScreenState extends State<DashboardOverviewScreen> {
       final courseStats = await _courseService.getCourseStats();
       final paymentStats = await _paymentService.getPaymentStats();
       final userStats = await _userService.getUserStats();
+      final enrollmentStats = await _enrollmentService.getEnrollmentStats();
 
       if (mounted) {
         setState(() {
@@ -41,6 +44,7 @@ class _DashboardOverviewScreenState extends State<DashboardOverviewScreen> {
             ...courseStats,
             ...paymentStats,
             ...userStats,
+            ...enrollmentStats,
           };
           _isLoading = false;
         });
@@ -80,6 +84,8 @@ class _DashboardOverviewScreenState extends State<DashboardOverviewScreen> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final columns = Breakpoints.getGridColumns(context).clamp(1, 4);
+        final cardWidth = (constraints.maxWidth - (AppTheme.spacingMD * (columns - 1))) / columns;
+
         return Wrap(
           spacing: AppTheme.spacingMD,
           runSpacing: AppTheme.spacingMD,
@@ -89,28 +95,56 @@ class _DashboardOverviewScreenState extends State<DashboardOverviewScreen> {
               '${_stats['total'] ?? 0}',
               Icons.people,
               AppTheme.primaryColor,
-              width: (constraints.maxWidth - (AppTheme.spacingMD * (columns - 1))) / columns,
+              width: cardWidth,
             ),
             _buildStatCard(
               'Total Courses',
               '${_stats['published'] ?? 0}/${_stats['total'] ?? 0}',
               Icons.school,
               AppTheme.secondaryColor,
-              width: (constraints.maxWidth - (AppTheme.spacingMD * (columns - 1))) / columns,
+              width: cardWidth,
             ),
             _buildStatCard(
               'Pending Payments',
               '${_stats['pending'] ?? 0}',
               Icons.pending_actions,
               AppTheme.warningColor,
-              width: (constraints.maxWidth - (AppTheme.spacingMD * (columns - 1))) / columns,
+              width: cardWidth,
             ),
             _buildStatCard(
               'Total Revenue',
               '₹${_stats['totalRevenue'] ?? 0}',
               Icons.currency_rupee,
               AppTheme.successColor,
-              width: (constraints.maxWidth - (AppTheme.spacingMD * (columns - 1))) / columns,
+              width: cardWidth,
+            ),
+            _buildStatCard(
+              'Live Students',
+              '${_stats['liveStudents'] ?? 0}',
+              Icons.check_circle,
+              const Color(0xFF10B981), // Green
+              width: cardWidth,
+            ),
+            _buildStatCard(
+              'Expired Students',
+              '${_stats['expiredStudents'] ?? 0}',
+              Icons.cancel,
+              const Color(0xFFEF4444), // Red
+              width: cardWidth,
+            ),
+            _buildStatCard(
+              'Expiring Soon',
+              '${_stats['expiringSoon'] ?? 0}',
+              Icons.warning,
+              const Color(0xFFF59E0B), // Orange
+              width: cardWidth,
+            ),
+            _buildStatCard(
+              'Total Enrollments',
+              '${_stats['totalEnrollments'] ?? 0}',
+              Icons.assignment,
+              const Color(0xFF8B5CF6), // Purple
+              width: cardWidth,
             ),
           ],
         );
