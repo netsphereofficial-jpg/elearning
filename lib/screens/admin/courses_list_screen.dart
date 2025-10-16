@@ -85,14 +85,21 @@ class _CoursesListScreenState extends State<CoursesListScreen> {
     );
 
     if (confirmed == true) {
-      final success = await _courseService.deleteCourse(course.id);
-      if (success) {
-        _loadCourses();
-        if (mounted) {
+      final result = await _courseService.deleteCourse(course.id);
+      if (mounted) {
+        if (result['success'] == true) {
+          _loadCourses();
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Course deleted'),
+            SnackBar(
+              content: Text(result['message'] ?? 'Course deleted'),
               backgroundColor: AppTheme.successColor,
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(result['message'] ?? 'Failed to delete course'),
+              backgroundColor: AppTheme.errorColor,
             ),
           );
         }

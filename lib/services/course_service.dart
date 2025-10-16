@@ -11,7 +11,7 @@ class CourseService {
       final snapshot = await _firestore
           .collection('courses')
           .where('isPublished', isEqualTo: true)
-          .orderBy('createdAt', descending: true)
+          .orderBy('createdAt', descending: false)
           .get();
 
       return snapshot.docs.map((doc) => CourseModel.fromFirestore(doc)).toList();

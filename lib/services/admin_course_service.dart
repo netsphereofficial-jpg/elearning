@@ -45,15 +45,48 @@ class AdminCourseService {
     }
   }
 
-  // Delete course (hard delete - permanently removes from database)
-  Future<bool> deleteCourse(String courseId) async {
+  // Check if course is assigned to any user
+  Future<bool> isCourseAssignedToUser(String courseId) async {
     try {
+      final snapshot = await _firestore
+          .collection('enrollments')
+          .where('courseId', isEqualTo: courseId)
+          .where('status', isEqualTo: 'approved')
+          .limit(1)
+          .get();
+
+      return snapshot.docs.isNotEmpty;
+    } catch (e) {
+      print('Error checking if course is assigned: $e');
+      return false;
+    }
+  }
+
+  // Delete course (hard delete - permanently removes from database)
+  Future<Map<String, dynamic>> deleteCourse(String courseId) async {
+    try {
+      // Check if course is assigned to any user
+      final isAssigned = await isCourseAssignedToUser(courseId);
+
+      if (isAssigned) {
+        return {
+          'success': false,
+          'message': 'Course is assigned to user',
+        };
+      }
+
       await _firestore.collection('courses').doc(courseId).delete();
       print('Course deleted: $courseId');
-      return true;
+      return {
+        'success': true,
+        'message': 'Course deleted successfully',
+      };
     } catch (e) {
       print('Error deleting course: $e');
-      return false;
+      return {
+        'success': false,
+        'message': 'Error deleting course: $e',
+      };
     }
   }
 
