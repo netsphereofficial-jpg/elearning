@@ -5,6 +5,8 @@ const { setGlobalOptions } = require("firebase-functions/v2");
 const admin = require("firebase-admin");
 const axios = require("axios");
 const jwt = require("jsonwebtoken");
+const { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand } = require("@aws-sdk/client-s3");
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
 // Initialize Firebase Admin
 admin.initializeApp();
@@ -15,13 +17,25 @@ setGlobalOptions({
   region: "us-central1",
 });
 
-// Bunny.net Stream Configuration
-const BUNNY_LIBRARY_ID = process.env.BUNNY_LIBRARY_ID || "506127";
-const BUNNY_API_KEY = process.env.BUNNY_API_KEY || "fcb219ae-cdd0-4d5e-84bab396f607-ac7e-45c2";
-const BUNNY_CDN_HOSTNAME = process.env.BUNNY_CDN_HOSTNAME || "vz-d86440c8-58b.b-cdn.net";
+// Cloudflare R2 Configuration
+const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID;
+const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
+const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
+const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME || "nikhil-bucket";
+const R2_PUBLIC_DOMAIN = process.env.R2_PUBLIC_DOMAIN; // Optional: Custom domain for R2
+
+// Initialize R2 Client
+const r2Client = new S3Client({
+  region: "auto",
+  endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+  credentials: {
+    accessKeyId: R2_ACCESS_KEY_ID,
+    secretAccessKey: R2_SECRET_ACCESS_KEY,
+  },
+});
 
 /**
- * Generate signed URL for Bunny Stream video
+ * Generate signed URL for R2 video
  */
 exports.generateSignedVideoUrl = onCall(async (request) => {
   try {
@@ -72,28 +86,32 @@ exports.generateSignedVideoUrl = onCall(async (request) => {
       throw new Error("Maximum concurrent sessions reached.");
     }
 
-    // Get Bunny video GUID
-    const bunnyVideoGuid = videoData.bunnyVideoGuid;
+    // Get R2 video key
+    const r2VideoKey = videoData.r2VideoKey;
 
-    if (!bunnyVideoGuid) {
-      throw new Error("Video not properly configured in Bunny Stream.");
+    if (!r2VideoKey) {
+      throw new Error("Video not properly configured in R2 storage.");
     }
 
-    // Generate token for additional security
-    const expirationTime = Math.floor(Date.now() / 1000) + 4 * 60 * 60; // 4 hours
+    // Generate signed URL for R2 video (4 hours expiration)
+    const command = new GetObjectCommand({
+      Bucket: R2_BUCKET_NAME,
+      Key: r2VideoKey,
+    });
 
+    const signedUrl = await getSignedUrl(r2Client, command, { expiresIn: 4 * 60 * 60 });
+    const expirationTime = Math.floor(Date.now() / 1000) + 4 * 60 * 60;
+
+    // Generate token for additional security
     const token = jwt.sign(
       {
         userId: userId,
         videoId: videoId,
-        bunnyVideoGuid: bunnyVideoGuid,
+        r2VideoKey: r2VideoKey,
         exp: expirationTime,
       },
       process.env.JWT_SECRET || "your-secret-key-change-this"
     );
-
-    // Bunny Stream HLS URL format
-    const signedUrl = `https://${BUNNY_CDN_HOSTNAME}/${bunnyVideoGuid}/playlist.m3u8`;
 
     // Log the access
     await admin.firestore().collection("videoAccess").add({
@@ -108,7 +126,7 @@ exports.generateSignedVideoUrl = onCall(async (request) => {
       signedUrl: signedUrl,
       expiresAt: expirationTime,
       token: token,
-      videoGuid: bunnyVideoGuid,
+      videoKey: r2VideoKey,
     };
   } catch (error) {
     console.error("Error generating signed URL:", error);
@@ -117,9 +135,9 @@ exports.generateSignedVideoUrl = onCall(async (request) => {
 });
 
 /**
- * Upload video to Bunny Stream (Admin only) - Legacy function
+ * Generate presigned upload URL for R2 (Admin only)
  */
-exports.uploadVideoToBunny = onCall(async (request) => {
+exports.getUploadUrl = onCall(async (request) => {
   try {
     // Check authentication and admin status
     if (!request.auth) {
@@ -132,72 +150,48 @@ exports.uploadVideoToBunny = onCall(async (request) => {
       .doc(request.auth.uid)
       .get();
 
-    if (!userDoc.exists || !userDoc.data().isAdmin) {
+    if (!userDoc.exists || userDoc.data().role !== "admin") {
       throw new Error("User does not have admin privileges.");
     }
 
-    const { title, collectionId } = request.data;
+    const { fileName, contentType } = request.data;
 
-    if (!title) {
-      throw new Error("Title is required.");
+    if (!fileName) {
+      throw new Error("File name is required.");
     }
 
-    // Create video in Bunny Stream
-    const response = await axios.post(
-      `https://video.bunnycdn.com/library/${BUNNY_LIBRARY_ID}/videos`,
-      {
-        title: title,
-        collectionId: collectionId || "",
-      },
-      {
-        headers: {
-          AccessKey: BUNNY_API_KEY,
-          "Content-Type": "application/json",
-        },
-      }
-    );
+    // Generate unique key for R2
+    const timestamp = Date.now();
+    const randomId = Math.random().toString(36).substring(7);
+    const r2VideoKey = `videos/${timestamp}-${randomId}-${fileName}`;
 
-    const bunnyVideoGuid = response.data.guid;
-    const bunnyVideoId = response.data.videoLibraryId;
+    // Generate presigned URL for upload (valid for 1 hour)
+    const command = new PutObjectCommand({
+      Bucket: R2_BUCKET_NAME,
+      Key: r2VideoKey,
+      ContentType: contentType || "video/mp4",
+    });
 
-    // Create video document in Firestore
-    const videoRef = await admin
-      .firestore()
-      .collection("videos")
-      .add({
-        title: title,
-        description: "",
-        bunnyVideoGuid: bunnyVideoGuid,
-        bunnyVideoId: bunnyVideoId,
-        thumbnailUrl: `https://${BUNNY_CDN_HOSTNAME}/${bunnyVideoGuid}/thumbnail.jpg`,
-        category: "General",
-        isPremium: false,
-        uploadedAt: admin.firestore.FieldValue.serverTimestamp(),
-        viewCount: 0,
-        tags: [],
-        durationInSeconds: 0,
-        processingStatus: "pending",
-      });
+    const uploadUrl = await getSignedUrl(r2Client, command, { expiresIn: 3600 });
 
     return {
       success: true,
-      videoId: videoRef.id,
-      bunnyVideoGuid: bunnyVideoGuid,
-      uploadUrl: `https://video.bunnycdn.com/library/${BUNNY_LIBRARY_ID}/videos/${bunnyVideoGuid}`,
-      message: "Video created. You can now upload the file via Bunny dashboard or API.",
+      uploadUrl: uploadUrl,
+      r2VideoKey: r2VideoKey,
+      expiresIn: 3600,
     };
   } catch (error) {
-    console.error("Error creating video in Bunny:", error);
-    throw new Error(`Failed to create video: ${error.message}`);
+    console.error("Error generating upload URL:", error);
+    throw new Error(`Failed to generate upload URL: ${error.message}`);
   }
 });
 
 /**
- * Create video in Bunny Stream and return upload credentials (Admin only)
+ * Create R2 video entry and return upload URL (Admin only)
  */
-exports.createBunnyVideoForUpload = onCall(async (request) => {
+exports.createR2VideoForUpload = onCall(async (request) => {
   try {
-    console.log("createBunnyVideoForUpload called");
+    console.log("createR2VideoForUpload called");
 
     // Check authentication and admin status
     if (!request.auth) {
@@ -227,81 +221,91 @@ exports.createBunnyVideoForUpload = onCall(async (request) => {
       throw new Error("User does not have admin privileges.");
     }
 
-    const { title } = request.data;
+    const { title, fileName, contentType } = request.data;
 
     if (!title) {
       console.error("No title provided");
       throw new Error("Video title is required.");
     }
 
-    console.log("Creating video in Bunny with title:", title);
+    if (!fileName) {
+      console.error("No file name provided");
+      throw new Error("File name is required.");
+    }
 
-    // Create video in Bunny Stream
-    const response = await axios.post(
-      `https://video.bunnycdn.com/library/${BUNNY_LIBRARY_ID}/videos`,
-      {
-        title: title,
-      },
-      {
-        headers: {
-          AccessKey: BUNNY_API_KEY,
-          "Content-Type": "application/json",
-        },
-      }
-    );
+    console.log("Creating R2 video entry with title:", title);
 
-    const bunnyVideoGuid = response.data.guid;
-    console.log("Video created successfully. GUID:", bunnyVideoGuid);
+    // Generate unique key for R2
+    const timestamp = Date.now();
+    const randomId = Math.random().toString(36).substring(7);
+    const r2VideoKey = `videos/${timestamp}-${randomId}-${fileName}`;
+
+    // Generate presigned URL for upload (valid for 1 hour)
+    const command = new PutObjectCommand({
+      Bucket: R2_BUCKET_NAME,
+      Key: r2VideoKey,
+      ContentType: contentType || "video/mp4",
+    });
+
+    const uploadUrl = await getSignedUrl(r2Client, command, { expiresIn: 3600 });
+
+    console.log("R2 video entry created successfully. Key:", r2VideoKey);
 
     return {
       success: true,
-      bunnyVideoGuid: bunnyVideoGuid,
-      libraryId: BUNNY_LIBRARY_ID,
-      uploadApiKey: BUNNY_API_KEY,
-      uploadUrl: `https://video.bunnycdn.com/library/${BUNNY_LIBRARY_ID}/videos/${bunnyVideoGuid}`,
-      thumbnailUrl: `https://${BUNNY_CDN_HOSTNAME}/${bunnyVideoGuid}/thumbnail.jpg`,
+      r2VideoKey: r2VideoKey,
+      uploadUrl: uploadUrl,
+      expiresIn: 3600,
+      // Placeholder thumbnail - you can implement thumbnail generation later
+      thumbnailUrl: "",
     };
   } catch (error) {
-    console.error("Error in createBunnyVideoForUpload:", error);
+    console.error("Error in createR2VideoForUpload:", error);
     console.error("Error details:", error.message, error.stack);
-    throw new Error(`Failed to create video: ${error.message}`);
+    throw new Error(`Failed to create video entry: ${error.message}`);
   }
 });
 
 /**
- * Check Bunny video processing status by GUID
+ * Check R2 video upload status
  */
-exports.checkBunnyVideoStatus = onCall(async (request) => {
+exports.checkR2VideoStatus = onCall(async (request) => {
   try {
     if (!request.auth) {
       throw new Error("User must be authenticated.");
     }
 
-    const { videoGuid } = request.data;
+    const { r2VideoKey } = request.data;
 
-    if (!videoGuid) {
-      throw new Error("Video GUID is required.");
+    if (!r2VideoKey) {
+      throw new Error("R2 video key is required.");
     }
 
-    // Get video status from Bunny
-    const response = await axios.get(
-      `https://video.bunnycdn.com/library/${BUNNY_LIBRARY_ID}/videos/${videoGuid}`,
-      {
-        headers: {
-          AccessKey: BUNNY_API_KEY,
-        },
+    // Check if video exists in R2
+    const command = new HeadObjectCommand({
+      Bucket: R2_BUCKET_NAME,
+      Key: r2VideoKey,
+    });
+
+    try {
+      const response = await r2Client.send(command);
+
+      return {
+        exists: true,
+        size: response.ContentLength,
+        contentType: response.ContentType,
+        lastModified: response.LastModified,
+        message: "Video uploaded successfully and ready to stream",
+      };
+    } catch (error) {
+      if (error.name === 'NotFound') {
+        return {
+          exists: false,
+          message: "Video not found in R2 storage",
+        };
       }
-    );
-
-    const status = response.data;
-
-    return {
-      status: status.status, // 0-5
-      progress: status.encodeProgress || 0,
-      duration: status.length || 0,
-      availableResolutions: status.availableResolutions || [],
-      message: status.status === 4 || status.status === 5 ? "Ready to stream" : "Processing...",
-    };
+      throw error;
+    }
   } catch (error) {
     console.error("Error checking video status:", error);
     throw new Error(`Failed to check status: ${error.message}`);
@@ -309,7 +313,7 @@ exports.checkBunnyVideoStatus = onCall(async (request) => {
 });
 
 /**
- * Check video processing status
+ * Check video upload status by videoId
  */
 exports.checkVideoStatus = onCall(async (request) => {
   try {
@@ -326,36 +330,43 @@ exports.checkVideoStatus = onCall(async (request) => {
     }
 
     const videoData = videoDoc.data();
-    const bunnyVideoGuid = videoData.bunnyVideoGuid;
+    const r2VideoKey = videoData.r2VideoKey;
 
-    // Get video status from Bunny
-    const response = await axios.get(
-      `https://video.bunnycdn.com/library/${BUNNY_LIBRARY_ID}/videos/${bunnyVideoGuid}`,
-      {
-        headers: {
-          AccessKey: BUNNY_API_KEY,
-        },
-      }
-    );
-
-    const status = response.data;
-
-    // Update Firestore if processing is complete
-    if (status.status === 4 || status.status === 5) {
-      // 4 = Transcoding, 5 = Finished
-      await admin.firestore().collection("videos").doc(videoId).update({
-        processingStatus: "completed",
-        durationInSeconds: status.length || 0,
-      });
+    if (!r2VideoKey) {
+      throw new Error("Video key not found.");
     }
 
-    return {
-      status: status.status, // Status codes: 0-6
-      progress: status.encodeProgress || 0,
-      duration: status.length || 0,
-      availableResolutions: status.availableResolutions || [],
-      message: status.status === 5 ? "Ready to stream" : "Processing...",
-    };
+    // Check if video exists in R2
+    const command = new HeadObjectCommand({
+      Bucket: R2_BUCKET_NAME,
+      Key: r2VideoKey,
+    });
+
+    try {
+      const response = await r2Client.send(command);
+
+      // Update Firestore if not already marked as completed
+      if (videoData.processingStatus !== "completed") {
+        await admin.firestore().collection("videos").doc(videoId).update({
+          processingStatus: "completed",
+        });
+      }
+
+      return {
+        exists: true,
+        size: response.ContentLength,
+        contentType: response.ContentType,
+        message: "Video ready to stream",
+      };
+    } catch (error) {
+      if (error.name === 'NotFound') {
+        return {
+          exists: false,
+          message: "Video not yet uploaded",
+        };
+      }
+      throw error;
+    }
   } catch (error) {
     console.error("Error checking video status:", error);
     throw new Error(`Failed to check status: ${error.message}`);
@@ -473,11 +484,11 @@ exports.cleanupVideoUploads = onSchedule("every 1 hours", async (event) => {
 });
 
 /**
- * Transfer video from Firebase Storage to Bunny Stream
+ * Confirm video upload to R2 and update Firestore (Admin only)
  */
-exports.transferVideoToBunny = onCall({ timeoutSeconds: 540 }, async (request) => {
+exports.confirmR2VideoUpload = onCall(async (request) => {
   try {
-    console.log("transferVideoToBunny called");
+    console.log("confirmR2VideoUpload called");
 
     // Check authentication and admin status
     if (!request.auth) {
@@ -494,69 +505,39 @@ exports.transferVideoToBunny = onCall({ timeoutSeconds: 540 }, async (request) =
       throw new Error("User does not have admin privileges.");
     }
 
-    const { bunnyVideoGuid, storagePath, title } = request.data;
+    const { r2VideoKey } = request.data;
 
-    if (!bunnyVideoGuid || !storagePath) {
-      throw new Error("Missing required parameters.");
+    if (!r2VideoKey) {
+      throw new Error("R2 video key is required.");
     }
 
-    console.log(`Transferring video from ${storagePath} to Bunny GUID ${bunnyVideoGuid}`);
+    console.log(`Confirming upload for video: ${r2VideoKey}`);
 
-    // Download file from Firebase Storage
-    const bucket = admin.storage().bucket();
-    const file = bucket.file(storagePath);
-
-    // Get file metadata
-    const [metadata] = await file.getMetadata();
-    console.log(`File size: ${metadata.size} bytes`);
-
-    // Make file temporarily public so Bunny can access it
-    await file.makePublic();
-    console.log("File made temporarily public");
-
-    // Get public URL
-    const publicUrl = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
-    console.log(`Public URL: ${publicUrl}`);
-
-    // Tell Bunny to fetch the video from the public URL
-    const response = await axios.post(
-      `https://video.bunnycdn.com/library/${BUNNY_LIBRARY_ID}/videos/${bunnyVideoGuid}/fetch`,
-      {
-        url: publicUrl,
-        headers: {},
-      },
-      {
-        headers: {
-          AccessKey: BUNNY_API_KEY,
-          "Content-Type": "application/json",
-        },
-      }
-    );
-
-    console.log("Bunny fetch response:", response.status, response.data);
-
-    // NOTE: We don't delete the file immediately because Bunny needs time to download it.
-    // The "fetch" API returns 200 OK immediately but downloads in background.
-    // Files will be cleaned up by the scheduled cleanup function after 30 minutes.
-
-    // Store metadata for cleanup
-    await admin.firestore().collection("videoUploads").add({
-      bunnyVideoGuid: bunnyVideoGuid,
-      storagePath: storagePath,
-      uploadedAt: admin.firestore.FieldValue.serverTimestamp(),
-      status: "transferred",
+    // Verify video exists in R2
+    const command = new HeadObjectCommand({
+      Bucket: R2_BUCKET_NAME,
+      Key: r2VideoKey,
     });
 
-    console.log("Video transfer initiated. File will be cleaned up automatically in 30 minutes.");
+    try {
+      const response = await r2Client.send(command);
+      console.log(`Video confirmed in R2. Size: ${response.ContentLength} bytes`);
 
-    return {
-      success: true,
-      message: "Video is being transferred to Bunny. Processing may take a few minutes.",
-      bunnyVideoGuid: bunnyVideoGuid,
-    };
+      return {
+        success: true,
+        message: "Video uploaded successfully to R2",
+        r2VideoKey: r2VideoKey,
+        size: response.ContentLength,
+      };
+    } catch (error) {
+      if (error.name === 'NotFound') {
+        throw new Error("Video not found in R2 storage. Upload may have failed.");
+      }
+      throw error;
+    }
   } catch (error) {
-    console.error("Error transferring video to Bunny:", error);
-    throw new Error(`Failed to transfer video: ${error.message}`);
+    console.error("Error confirming video upload:", error);
+    throw new Error(`Failed to confirm upload: ${error.message}`);
   }
 });
 

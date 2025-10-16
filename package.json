@@ -1,0 +1,23 @@
+{
+  "name": "elearning",
+  "version": "1.0.0",
+  "description": "A secure, scalable video streaming platform built with Flutter Web, Firebase, and Cloudflare Stream (or Google Cloud Storage).",
+  "main": "add_test_video.js",
+  "directories": {
+    "lib": "lib",
+    "test": "test"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/netsphereofficial-jpg/elearning.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/netsphereofficial-jpg/elearning/issues"
+  },
+  "homepage": "https://github.com/netsphereofficial-jpg/elearning#readme"
+}

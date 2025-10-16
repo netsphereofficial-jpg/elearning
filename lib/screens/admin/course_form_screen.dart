@@ -3,7 +3,7 @@ import 'package:file_picker/file_picker.dart';
 import '../../constants/app_theme.dart';
 import '../../models/course_model.dart';
 import '../../services/admin_course_service.dart';
-import '../../services/bunny_upload_service.dart';
+import '../../services/simple_storage_service.dart';
 
 class CourseFormScreen extends StatefulWidget {
   final CourseModel? course;
@@ -250,11 +250,11 @@ class _VideoFormDialog extends StatefulWidget {
 
 class _VideoFormDialogState extends State<_VideoFormDialog> {
   final _formKey = GlobalKey<FormState>();
-  final BunnyUploadService _uploadService = BunnyUploadService();
+  final SimpleStorageService _uploadService = SimpleStorageService();
 
   late TextEditingController _titleController;
   late TextEditingController _descController;
-  late TextEditingController _guidController;
+  late TextEditingController _videoKeyController;
   late TextEditingController _thumbController;
   late TextEditingController _durationController;
   late TextEditingController _orderController;
@@ -270,7 +270,7 @@ class _VideoFormDialogState extends State<_VideoFormDialog> {
     final video = widget.video;
     _titleController = TextEditingController(text: video?.title ?? '');
     _descController = TextEditingController(text: video?.description ?? '');
-    _guidController = TextEditingController(text: video?.bunnyVideoGuid ?? '62d26a71-7b57-43c7-bdf2-8da954fc45c8');
+    _videoKeyController = TextEditingController(text: video?.bunnyVideoGuid ?? '');
     _thumbController = TextEditingController(text: video?.thumbnailUrl ?? '');
     _durationController = TextEditingController(text: video?.durationInSeconds.toString() ?? '600');
     _orderController = TextEditingController(text: video?.order.toString() ?? '1');
@@ -281,7 +281,7 @@ class _VideoFormDialogState extends State<_VideoFormDialog> {
   void dispose() {
     _titleController.dispose();
     _descController.dispose();
-    _guidController.dispose();
+    _videoKeyController.dispose();
     _thumbController.dispose();
     _durationController.dispose();
     _orderController.dispose();
@@ -318,17 +318,8 @@ class _VideoFormDialogState extends State<_VideoFormDialog> {
         _uploadProgress = 0.0;
       });
 
-      // Create video in Bunny
-      final creationResult = await _uploadService.createVideo(title);
-
-      if (creationResult == null) {
-        throw Exception('Failed to create video in Bunny');
-      }
-
-      // Upload file via Firebase Storage (supports unlimited size)
-      final success = await _uploadService.uploadVideoViaStorage(
-        title: title,
-        bunnyVideoGuid: creationResult.bunnyVideoGuid,
+      // Upload file to Firebase Storage
+      final storagePath = await _uploadService.uploadVideo(
         fileBytes: file.bytes!,
         fileName: file.name,
         onProgress: (progress) {
@@ -340,16 +331,17 @@ class _VideoFormDialogState extends State<_VideoFormDialog> {
         },
       );
 
-      if (success) {
+      if (storagePath != null) {
         setState(() {
-          _guidController.text = creationResult.bunnyVideoGuid;
-          _thumbController.text = 'https://vz-d86440c8-58b.b-cdn.net/${creationResult.bunnyVideoGuid}/thumbnail.jpg';
+          _videoKeyController.text = storagePath;
+          // Set thumbnail URL (you can generate thumbnails later)
+          _thumbController.text = '';
         });
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Video uploaded successfully! Processing may take a few minutes.'),
+              content: Text('Video uploaded successfully!'),
               backgroundColor: AppTheme.successColor,
             ),
           );
@@ -381,7 +373,7 @@ class _VideoFormDialogState extends State<_VideoFormDialog> {
       videoId: widget.video?.videoId ?? 'video_${DateTime.now().millisecondsSinceEpoch}',
       title: _titleController.text.trim(),
       description: _descController.text.trim(),
-      bunnyVideoGuid: _guidController.text.trim(),
+      bunnyVideoGuid: _videoKeyController.text.trim(), // Using same field for R2 key
       thumbnailUrl: _thumbController.text.trim(),
       durationInSeconds: int.parse(_durationController.text),
       order: int.parse(_orderController.text),
@@ -441,7 +433,7 @@ class _VideoFormDialogState extends State<_VideoFormDialog> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Supports unlimited file size • Upload via Firebase Storage',
+                      'Upload to Firebase Storage • Supports large files',
                       style: TextStyle(
                         fontSize: 11,
                         color: AppTheme.textSecondary,
@@ -468,7 +460,7 @@ class _VideoFormDialogState extends State<_VideoFormDialog> {
                     ],
                     const SizedBox(height: 8),
                     const Text(
-                      'OR enter GUID manually below',
+                      'OR enter storage path manually below',
                       style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
                     ),
                   ],
@@ -483,9 +475,9 @@ class _VideoFormDialogState extends State<_VideoFormDialog> {
                 enabled: !_isUploading,
               ),
               TextFormField(
-                controller: _guidController,
+                controller: _videoKeyController,
                 decoration: const InputDecoration(
-                  labelText: 'Bunny Video GUID',
+                  labelText: 'Storage Path',
                   hintText: 'Auto-filled after upload',
                 ),
                 validator: (v) => v?.isEmpty == true ? 'Required' : null,

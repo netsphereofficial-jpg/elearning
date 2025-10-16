@@ -52,30 +52,20 @@ class VideoService {
     }
   }
 
-  // Generate video URL directly from Bunny CDN (no Cloud Function needed)
+  // Generate signed video URL from R2 via Cloud Function
   Future<String?> generateSignedVideoUrl(String userId, String videoId) async {
     try {
-      // Get video document
-      final videoDoc = await _firestore.collection('videos').doc(videoId).get();
+      print('Generating signed URL for video: $videoId');
 
-      if (!videoDoc.exists) {
-        print('Video not found');
-        return null;
-      }
+      // Call Cloud Function to generate signed R2 URL
+      final callable = _functions.httpsCallable('generateSignedVideoUrl');
+      final result = await callable.call({
+        'videoId': videoId,
+      });
 
-      final videoData = videoDoc.data();
-      final bunnyVideoGuid = videoData?['bunnyVideoGuid'];
-
-      if (bunnyVideoGuid == null) {
-        print('Video GUID not found');
-        return null;
-      }
-
-      // Direct Bunny Stream HLS URL
-      final videoUrl = 'https://vz-d86440c8-58b.b-cdn.net/$bunnyVideoGuid/playlist.m3u8';
-
-      print('Generated video URL: $videoUrl');
-      return videoUrl;
+      final signedUrl = result.data['signedUrl'];
+      print('Generated signed R2 URL');
+      return signedUrl;
     } catch (e) {
       print('Error generating video URL: $e');
       return null;

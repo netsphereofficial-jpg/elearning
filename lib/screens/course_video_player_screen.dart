@@ -6,6 +6,7 @@ import 'dart:async';
 import '../models/course_model.dart';
 import '../services/google_auth_service.dart';
 import '../services/course_progress_service.dart';
+import '../services/simple_storage_service.dart';
 import '../constants/app_theme.dart';
 
 class CourseVideoPlayerScreen extends StatefulWidget {
@@ -28,6 +29,7 @@ class CourseVideoPlayerScreen extends StatefulWidget {
 
 class _CourseVideoPlayerScreenState extends State<CourseVideoPlayerScreen> {
   final CourseProgressService _progressService = CourseProgressService();
+  final SimpleStorageService _storageService = SimpleStorageService();
 
   VideoPlayerController? _videoPlayerController;
   ChewieController? _chewieController;
@@ -77,11 +79,18 @@ class _CourseVideoPlayerScreenState extends State<CourseVideoPlayerScreen> {
         _totalWatchTime = session.totalWatchTime;
       }
 
-      // Bunny.net HLS URL
-      final hlsUrl = 'https://vz-d86440c8-58b.b-cdn.net/${widget.video.bunnyVideoGuid}/playlist.m3u8';
+      // Get Firebase Storage download URL
+      final storagePath = widget.video.bunnyVideoGuid; // Using same field for storage path
+      final videoUrl = await _storageService.getDownloadUrl(storagePath);
 
-      // Initialize video player
-      _videoPlayerController = VideoPlayerController.networkUrl(Uri.parse(hlsUrl));
+      if (videoUrl == null) {
+        throw Exception('Failed to get video URL');
+      }
+
+      print('Using Firebase Storage URL: $videoUrl');
+
+      // Initialize video player with Firebase Storage URL
+      _videoPlayerController = VideoPlayerController.networkUrl(Uri.parse(videoUrl));
 
       await _videoPlayerController!.initialize();
 
