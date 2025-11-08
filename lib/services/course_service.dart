@@ -15,9 +15,15 @@ class CourseService {
           .get();
 
       return snapshot.docs.map((doc) => CourseModel.fromFirestore(doc)).toList();
+    } on FirebaseException catch (e) {
+      print('❌ Firestore Error getting courses: ${e.code} - ${e.message}');
+      if (e.code == 'permission-denied') {
+        throw Exception('Permission denied: Unable to access courses. Please check Firestore security rules.');
+      }
+      throw Exception('Failed to load courses: ${e.message ?? e.code}');
     } catch (e) {
-      print('Error getting courses: $e');
-      return [];
+      print('❌ Error getting courses: $e');
+      throw Exception('Unexpected error loading courses: $e');
     }
   }
 
@@ -104,9 +110,15 @@ class CourseService {
     try {
       await _firestore.collection('enrollments').add(enrollment.toFirestore());
       return true;
+    } on FirebaseException catch (e) {
+      print('❌ Firestore Error enrolling user: ${e.code} - ${e.message}');
+      if (e.code == 'permission-denied') {
+        throw Exception('Permission denied: Unable to submit enrollment. Please ensure you are logged in.');
+      }
+      throw Exception('Failed to submit enrollment: ${e.message ?? e.code}');
     } catch (e) {
-      print('Error enrolling user: $e');
-      return false;
+      print('❌ Error enrolling user: $e');
+      throw Exception('Unexpected error during enrollment: $e');
     }
   }
 

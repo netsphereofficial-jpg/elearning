@@ -54,6 +54,30 @@ class _CourseFormScreenState extends State<CourseFormScreen> {
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
 
+    // Validate that course has at least one video
+    if (_videos.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please add at least one video to the course before saving!'),
+          backgroundColor: AppTheme.errorColor,
+          duration: Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
+
+    // Warn if trying to publish a course without videos
+    if (_isPublished && _videos.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Cannot publish a course without videos!'),
+          backgroundColor: AppTheme.errorColor,
+          duration: Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
@@ -311,6 +335,22 @@ class _VideoFormDialogState extends State<_VideoFormDialog> {
       if (result == null || result.files.isEmpty) return;
 
       final file = result.files.first;
+
+      // Validate file size (500MB max for stable uploads)
+      const maxSizeBytes = 500 * 1024 * 1024; // 500MB
+      if (file.bytes != null && file.bytes!.length > maxSizeBytes) {
+        final fileSizeMB = (file.bytes!.length / 1024 / 1024).toStringAsFixed(1);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'File too large! Maximum size is 500MB.\nYour file: ${fileSizeMB}MB\n\nPlease compress the video or use a smaller file.',
+            ),
+            backgroundColor: AppTheme.errorColor,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+        return;
+      }
 
       setState(() {
         _selectedFileName = file.name;

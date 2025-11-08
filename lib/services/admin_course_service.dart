@@ -25,11 +25,17 @@ class AdminCourseService {
   Future<String?> createCourse(CourseModel course) async {
     try {
       final docRef = await _firestore.collection('courses').add(course.toFirestore());
-      print('Course created: ${docRef.id}');
+      print('✅ Course created: ${docRef.id}');
       return docRef.id;
+    } on FirebaseException catch (e) {
+      print('❌ Firestore Error creating course: ${e.code} - ${e.message}');
+      if (e.code == 'permission-denied') {
+        throw Exception('Permission denied: You must be an admin to create courses.');
+      }
+      throw Exception('Failed to create course: ${e.message ?? e.code}');
     } catch (e) {
-      print('Error creating course: $e');
-      return null;
+      print('❌ Error creating course: $e');
+      throw Exception('Unexpected error creating course: $e');
     }
   }
 
@@ -37,11 +43,19 @@ class AdminCourseService {
   Future<bool> updateCourse(String courseId, CourseModel course) async {
     try {
       await _firestore.collection('courses').doc(courseId).update(course.toFirestore());
-      print('Course updated: $courseId');
+      print('✅ Course updated: $courseId');
       return true;
+    } on FirebaseException catch (e) {
+      print('❌ Firestore Error updating course: ${e.code} - ${e.message}');
+      if (e.code == 'permission-denied') {
+        throw Exception('Permission denied: You must be an admin to update courses.');
+      } else if (e.code == 'not-found') {
+        throw Exception('Course not found.');
+      }
+      throw Exception('Failed to update course: ${e.message ?? e.code}');
     } catch (e) {
-      print('Error updating course: $e');
-      return false;
+      print('❌ Error updating course: $e');
+      throw Exception('Unexpected error updating course: $e');
     }
   }
 

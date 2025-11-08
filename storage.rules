@@ -1,0 +1,30 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Helper function to check if user is admin
+    function isAdmin() {
+      return request.auth != null &&
+             firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Video files storage
+    match /videos/{videoFile} {
+      // Only admins can upload/delete videos
+      allow write, delete: if isAdmin();
+      // Authenticated users can read videos (for enrolled courses)
+      allow read: if isAuthenticated();
+    }
+
+    // Any other files - restrict completely
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

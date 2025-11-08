@@ -393,7 +393,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        'Your enrollment will be activated immediately after submission.',
+                        'Your enrollment request will be reviewed by an admin. You will gain access to the course once approved.',
                         style: TextStyle(
                           fontSize: 12,
                           color: Colors.blue[900],

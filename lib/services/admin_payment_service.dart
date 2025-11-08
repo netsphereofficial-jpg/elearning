@@ -85,11 +85,19 @@ class AdminPaymentService {
         'validUntil': Timestamp.fromDate(validUntil),
       });
 
-      print('Payment approved: $enrollmentId by admin: $adminId');
+      print('✅ Payment approved: $enrollmentId by admin: $adminId');
       return true;
+    } on FirebaseException catch (e) {
+      print('❌ Firestore Error approving payment: ${e.code} - ${e.message}');
+      if (e.code == 'permission-denied') {
+        throw Exception('Permission denied: You must be an admin to approve payments.');
+      } else if (e.code == 'not-found') {
+        throw Exception('Enrollment not found.');
+      }
+      throw Exception('Failed to approve payment: ${e.message ?? e.code}');
     } catch (e) {
-      print('Error approving payment: $e');
-      return false;
+      print('❌ Error approving payment: $e');
+      rethrow;
     }
   }
 
@@ -103,11 +111,19 @@ class AdminPaymentService {
         'rejectionReason': reason,
       });
 
-      print('Payment rejected: $enrollmentId by admin: $adminId');
+      print('✅ Payment rejected: $enrollmentId by admin: $adminId');
       return true;
+    } on FirebaseException catch (e) {
+      print('❌ Firestore Error rejecting payment: ${e.code} - ${e.message}');
+      if (e.code == 'permission-denied') {
+        throw Exception('Permission denied: You must be an admin to reject payments.');
+      } else if (e.code == 'not-found') {
+        throw Exception('Enrollment not found.');
+      }
+      throw Exception('Failed to reject payment: ${e.message ?? e.code}');
     } catch (e) {
-      print('Error rejecting payment: $e');
-      return false;
+      print('❌ Error rejecting payment: $e');
+      rethrow;
     }
   }
 

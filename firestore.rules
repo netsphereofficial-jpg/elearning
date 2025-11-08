@@ -1,18 +1,76 @@
-rules_version='2'
+rules_version='2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      // This rule allows anyone with your database reference to view, edit,
-      // and delete all data in your database. It is useful for getting
-      // started, but it is configured to expire after 30 days because it
-      // leaves your app open to attackers. At that time, all client
-      // requests to your database will be denied.
-      //
-      // Make sure to write security rules for your app before that time, or
-      // else all client requests to your database will be denied until you
-      // update your rules.
-      allow read, write: if request.time < timestamp.date(2025, 11, 6);
+
+    // Helper function to check if user is admin
+    function isAdmin() {
+      return request.auth != null &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Courses collection
+    match /courses/{courseId} {
+      // Anyone can read published courses
+      allow read: if resource.data.isPublished == true || isAdmin();
+      // Only admins can create, update, or delete courses
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Enrollments collection
+    match /enrollments/{enrollmentId} {
+      // Users can read their own enrollments, admins can read all
+      allow read: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
+      // Users can create enrollments for themselves
+      allow create: if isAuthenticated() &&
+                      request.resource.data.userId == request.auth.uid &&
+                      request.resource.data.status == 'pending';
+      // Only admins can update enrollments (for approval/rejection)
+      allow update: if isAdmin();
+      // Only admins can delete enrollments
+      allow delete: if isAdmin();
+    }
+
+    // Users collection
+    match /users/{userId} {
+      // Authenticated users can read all user profiles
+      allow read: if isAuthenticated();
+      // Users can update their own profile, admins can update any profile
+      allow update: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      // Only admins or the user themselves can create user documents
+      allow create: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      // Only admins can delete users
+      allow delete: if isAdmin();
+    }
+
+    // Settings collection (payment settings, etc.)
+    match /settings/{settingId} {
+      // Anyone can read settings (needed for payment QR code, etc.)
+      allow read: if true;
+      // Only admins can modify settings
+      allow write: if isAdmin();
+    }
+
+    // Video progress tracking
+    match /videoProgress/{progressId} {
+      // Users can read their own progress, admins can read all
+      allow read: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
+      // Users can create/update their own progress
+      allow create, update: if isAuthenticated() &&
+                              request.resource.data.userId == request.auth.uid;
+      // Users can delete their own progress, admins can delete any
+      allow delete: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
     }
   }
 }

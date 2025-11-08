@@ -6,6 +6,8 @@ class SimpleStorageService {
   final FirebaseStorage _storage = FirebaseStorage.instance;
 
   /// Upload video to Firebase Storage
+  /// Returns storage path on success, null on failure
+  /// Throws detailed error messages for better error handling
   Future<String?> uploadVideo({
     required Uint8List fileBytes,
     required String fileName,
@@ -17,7 +19,7 @@ class SimpleStorageService {
       final storagePath = 'videos/$timestamp-$fileName';
 
       print('📤 Uploading to Firebase Storage: $storagePath');
-      print('📦 File size: ${fileBytes.length} bytes');
+      print('📦 File size: ${(fileBytes.length / 1024 / 1024).toStringAsFixed(2)} MB');
 
       // Create reference
       final storageRef = _storage.ref().child(storagePath);
@@ -29,6 +31,7 @@ class SimpleStorageService {
           contentType: _getContentType(fileName),
           customMetadata: {
             'uploadedAt': DateTime.now().toIso8601String(),
+            'originalFileName': fileName,
           },
         ),
       );
@@ -40,18 +43,54 @@ class SimpleStorageService {
         print('📊 Upload progress: ${(progress * 100).toStringAsFixed(1)}%');
       });
 
-      // Wait for completion
-      final snapshot = await uploadTask;
+      // Wait for completion with timeout
+      final snapshot = await uploadTask.timeout(
+        const Duration(minutes: 30),
+        onTimeout: () {
+          throw Exception('Upload timeout: The upload took too long (>30 minutes). Please try a smaller file or check your internet connection.');
+        },
+      );
+
       print('✅ Upload complete!');
 
-      // Get download URL
+      // Verify upload success
+      if (snapshot.state != TaskState.success) {
+        throw Exception('Upload failed with state: ${snapshot.state}');
+      }
+
+      // Get download URL to verify file is accessible
       final downloadUrl = await snapshot.ref.getDownloadURL();
       print('🔗 Download URL: $downloadUrl');
 
       return storagePath; // Return the path, not URL
+    } on FirebaseException catch (e) {
+      print('❌ Firebase Storage Error: ${e.code} - ${e.message}');
+
+      // Provide user-friendly error messages
+      String errorMessage;
+      switch (e.code) {
+        case 'unauthorized':
+          errorMessage = 'Permission denied. Please ensure you are logged in as an admin.';
+          break;
+        case 'canceled':
+          errorMessage = 'Upload was canceled.';
+          break;
+        case 'unknown':
+          errorMessage = 'An unknown error occurred. Please check your internet connection and try again.';
+          break;
+        case 'quota-exceeded':
+          errorMessage = 'Storage quota exceeded. Please contact the administrator.';
+          break;
+        case 'unauthenticated':
+          errorMessage = 'You must be logged in to upload videos.';
+          break;
+        default:
+          errorMessage = 'Upload failed: ${e.message ?? e.code}';
+      }
+      throw Exception(errorMessage);
     } catch (e) {
       print('❌ Error uploading: $e');
-      return null;
+      rethrow;
     }
   }
 
@@ -60,9 +99,17 @@ class SimpleStorageService {
     try {
       final ref = _storage.ref().child(storagePath);
       return await ref.getDownloadURL();
+    } on FirebaseException catch (e) {
+      print('❌ Firebase Storage Error getting URL: ${e.code} - ${e.message}');
+      if (e.code == 'object-not-found') {
+        throw Exception('Video not found. It may have been deleted.');
+      } else if (e.code == 'unauthorized') {
+        throw Exception('Permission denied. Please ensure you are enrolled in this course.');
+      }
+      throw Exception('Failed to load video: ${e.message ?? e.code}');
     } catch (e) {
-      print('Error getting download URL: $e');
-      return null;
+      print('❌ Error getting download URL: $e');
+      rethrow;
     }
   }
 

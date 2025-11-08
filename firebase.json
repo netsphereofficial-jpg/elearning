@@ -5,6 +5,10 @@
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
   },
+  "storage": {
+    "bucket": "website-sombo.firebasestorage.app",
+    "rules": "storage.rules"
+  },
   "functions": [
     {
       "source": "functions",
