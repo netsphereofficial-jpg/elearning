@@ -16,8 +16,8 @@ service firebase.storage {
 
     // Video files storage
     match /videos/{videoFile} {
-      // Only admins can upload/delete videos
-      allow write, delete: if isAdmin();
+      // For testing: Allow any authenticated user to upload/delete videos
+      allow write, delete: if isAuthenticated();
       // Authenticated users can read videos (for enrolled courses)
       allow read: if isAuthenticated();
     }
