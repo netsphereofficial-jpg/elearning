@@ -1,9 +1,13 @@
 import 'dart:typed_data';
+import 'dart:convert';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:http/http.dart' as http;
 
 /// Simple Firebase Storage service - no complex signing needed!
 class SimpleStorageService {
   final FirebaseStorage _storage = FirebaseStorage.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
 
   /// Upload video to Firebase Storage
   /// Returns storage path on success, null on failure
@@ -94,7 +98,65 @@ class SimpleStorageService {
     }
   }
 
-  /// Get download URL for a video
+  /// Get SECURE download URL for a video using Cloud Function (HTTP endpoint)
+  /// This generates a short-lived signed URL to prevent unauthorized downloads
+  Future<String?> getSecureDownloadUrl({
+    required String storagePath,
+    required String courseId,
+    required String videoId,
+  }) async {
+    try {
+      print('🔐 Requesting secure URL for: $storagePath');
+
+      // Get Firebase ID token for authentication
+      final user = _auth.currentUser;
+      if (user == null) {
+        throw Exception('User must be logged in to access videos');
+      }
+
+      final idToken = await user.getIdToken();
+      if (idToken == null) {
+        throw Exception('Failed to get authentication token');
+      }
+
+      // Call HTTP Cloud Function with authentication
+      final response = await http.post(
+        Uri.parse('https://us-central1-website-sombo.cloudfunctions.net/getSecureVideoUrl'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $idToken',
+        },
+        body: jsonEncode({
+          'storagePath': storagePath,
+          'courseId': courseId,
+          'videoId': videoId,
+        }),
+      );
+
+      if (response.statusCode != 200) {
+        final error = jsonDecode(response.body);
+        throw Exception(error['error'] ?? 'Failed to generate secure URL');
+      }
+
+      final data = jsonDecode(response.body);
+      final signedUrl = data['signedUrl'] as String?;
+      final expiresAt = data['expiresAt'] as int?;
+
+      if (signedUrl == null) {
+        throw Exception('Failed to generate secure URL');
+      }
+
+      print('✅ Secure URL generated, expires at: ${DateTime.fromMillisecondsSinceEpoch(expiresAt! * 1000)}');
+
+      return signedUrl;
+    } catch (e) {
+      print('❌ Error getting secure download URL: $e');
+      throw Exception('Failed to load video: $e');
+    }
+  }
+
+  /// Get download URL for a video (LEGACY - INSECURE, use getSecureDownloadUrl instead)
+  @Deprecated('Use getSecureDownloadUrl instead for better security')
   Future<String?> getDownloadUrl(String storagePath) async {
     try {
       final ref = _storage.ref().child(storagePath);

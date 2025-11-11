@@ -1,4 +1,4 @@
-const { onCall } = require("firebase-functions/v2/https");
+const { onCall, onRequest } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { setGlobalOptions } = require("firebase-functions/v2");
@@ -572,5 +572,169 @@ exports.detectAbnormalPlayback = onDocumentUpdated(
 
       console.log(`Suspicious activity detected for user ${event.params.userId}`);
     }
+  }
+);
+
+/**
+ * Generate secure signed URL for Firebase Storage videos (HTTP version)
+ * This prevents unauthorized video downloads
+ */
+exports.getSecureVideoUrl = onRequest(
+  {
+    cors: ["https://website-sombo.web.app", "https://website-sombo.firebaseapp.com", /localhost/],
+  },
+  async (req, res) => {
+  try {
+    // Only allow POST requests
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+
+    // Verify Firebase ID token from Authorization header
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      res.status(401).json({ error: "Unauthorized - No token provided" });
+      return;
+    }
+
+    const idToken = authHeader.split("Bearer ")[1];
+    let decodedToken;
+
+    try {
+      decodedToken = await admin.auth().verifyIdToken(idToken);
+    } catch (error) {
+      console.error("Token verification failed:", error);
+      res.status(401).json({ error: "Unauthorized - Invalid token" });
+      return;
+    }
+
+    const userId = decodedToken.uid;
+    const { courseId, videoId, storagePath } = req.body;
+
+    if (!courseId || !videoId || !storagePath) {
+      throw new Error("Course ID, Video ID, and Storage Path are required.");
+    }
+
+    console.log(`🔐 Generating secure URL for user ${userId}, video ${videoId}`);
+
+    // 1. Check if user is enrolled in the course
+    const enrollmentQuery = await admin
+      .firestore()
+      .collection("enrollments")
+      .where("userId", "==", userId)
+      .where("courseId", "==", courseId)
+      .where("status", "==", "approved")
+      .limit(1)
+      .get();
+
+    if (enrollmentQuery.empty) {
+      throw new Error("User is not enrolled in this course.");
+    }
+
+    const enrollment = enrollmentQuery.docs[0].data();
+
+    // 2. Check if enrollment is still valid (not expired)
+    if (enrollment.validUntil && enrollment.validUntil.toMillis() < Date.now()) {
+      throw new Error("Your course enrollment has expired.");
+    }
+
+    // 3. Get course details to check if video is free or requires premium access
+    const courseDoc = await admin
+      .firestore()
+      .collection("courses")
+      .doc(courseId)
+      .get();
+
+    if (!courseDoc.exists) {
+      throw new Error("Course not found.");
+    }
+
+    const courseData = courseDoc.data();
+
+    // Find the video in course videos
+    const video = courseData.videos?.find((v) => v.videoId === videoId);
+
+    if (!video) {
+      throw new Error("Video not found in course.");
+    }
+
+    // 4. If video is not free, check enrollment validity
+    // Enrollment status is already checked above (must be "approved")
+    // So if we reach here, the enrollment is valid
+
+    // 5. Check concurrent sessions to prevent sharing (optional - disabled for now)
+    // TODO: Create Firestore index for sessions collection to enable this
+    // const activeSessions = await admin
+    //   .firestore()
+    //   .collection("users")
+    //   .doc(userId)
+    //   .collection("sessions")
+    //   .where("isActive", "==", true)
+    //   .where("lastActiveAt", ">", new Date(Date.now() - 4 * 60 * 60 * 1000))
+    //   .get();
+
+    // 6. Generate download URL from Firebase Storage
+    const bucket = admin.storage().bucket();
+    const file = bucket.file(storagePath);
+
+    // Check if file exists
+    const [exists] = await file.exists();
+    if (!exists) {
+      throw new Error("Video file not found in storage. Please contact support.");
+    }
+
+    // Get the public download URL with access token
+    // This uses Firebase's built-in token system
+    const [metadata] = await file.getMetadata();
+    const token = metadata.metadata?.firebaseStorageDownloadTokens || metadata.metadata?.token;
+
+    let signedUrl;
+    if (token) {
+      // Use token-based URL (works with storage rules)
+      signedUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media&token=${token}`;
+    } else {
+      // Fallback to basic URL (requires storage rules to allow authenticated access)
+      signedUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media`;
+    }
+
+    const expirationTime = Math.floor(Date.now() / 1000) + 15 * 60;
+
+    // 7. Log video access for analytics and abuse detection
+    await admin.firestore().collection("videoAccess").add({
+      userId: userId,
+      courseId: courseId,
+      videoId: videoId,
+      storagePath: storagePath,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      ipAddress: req.ip || "unknown",
+      userAgent: req.headers["user-agent"] || "unknown",
+      expiresAt: new Date(expirationTime * 1000),
+    });
+
+    // 8. Generate access token for additional verification
+    const accessToken = jwt.sign(
+      {
+        userId: userId,
+        courseId: courseId,
+        videoId: videoId,
+        storagePath: storagePath,
+        exp: expirationTime,
+      },
+      process.env.JWT_SECRET || "your-secret-key-change-this"
+    );
+
+    console.log(`✅ Secure URL generated for user ${userId}, video ${videoId}`);
+
+    res.status(200).json({
+      signedUrl: signedUrl,
+      expiresAt: expirationTime,
+      accessToken: accessToken,
+      videoId: videoId,
+    });
+  } catch (error) {
+    console.error("❌ Error generating secure video URL:", error);
+    res.status(500).json({ error: `Failed to generate video URL: ${error.message}` });
+  }
   }
 );

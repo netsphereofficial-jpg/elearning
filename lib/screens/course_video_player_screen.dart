@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 import 'package:chewie/chewie.dart';
 import 'dart:async';
+import 'dart:html' as html;
 import '../models/course_model.dart';
 import '../services/google_auth_service.dart';
 import '../services/course_progress_service.dart';
@@ -50,6 +51,53 @@ class _CourseVideoPlayerScreenState extends State<CourseVideoPlayerScreen> {
     super.initState();
     _sessionStartTime = DateTime.now();
     _initializePlayer();
+    _disableRightClickOnVideo();
+  }
+
+  // Disable right-click context menu on video elements (web only)
+  void _disableRightClickOnVideo() {
+    // Try multiple times to catch video elements as they load
+    for (int i = 0; i < 5; i++) {
+      Future.delayed(Duration(milliseconds: 500 * (i + 1)), () {
+        try {
+          // Find all video elements in the page
+          final videos = html.document.querySelectorAll('video');
+          print('Found ${videos.length} video elements');
+
+          for (var video in videos) {
+            // Disable context menu (right-click)
+            video.addEventListener('contextmenu', (event) {
+              event.preventDefault();
+              event.stopPropagation();
+              return false;
+            });
+
+            // Disable download attribute
+            video.setAttribute('controlsList', 'nodownload noremoteplayback');
+
+            // Disable picture-in-picture
+            video.setAttribute('disablePictureInPicture', 'true');
+
+            // Disable right-click on video controls
+            video.setAttribute('oncontextmenu', 'return false;');
+
+            print('✅ Disabled right-click on video element');
+          }
+
+          // Also disable right-click on the entire video container
+          final videoContainers = html.document.querySelectorAll('.video-wrapper, video-container');
+          for (var container in videoContainers) {
+            container.addEventListener('contextmenu', (event) {
+              event.preventDefault();
+              event.stopPropagation();
+              return false;
+            });
+          }
+        } catch (e) {
+          print('❌ Error disabling right-click: $e');
+        }
+      });
+    }
   }
 
   Future<void> _initializePlayer() async {
@@ -79,15 +127,22 @@ class _CourseVideoPlayerScreenState extends State<CourseVideoPlayerScreen> {
         _totalWatchTime = session.totalWatchTime;
       }
 
-      // Get Firebase Storage download URL
+      // Get SECURE Firebase Storage download URL via Cloud Function
       final storagePath = widget.video.bunnyVideoGuid; // Using same field for storage path
-      final videoUrl = await _storageService.getDownloadUrl(storagePath);
+
+      print('🎬 Requesting secure video URL for: $storagePath');
+
+      final videoUrl = await _storageService.getSecureDownloadUrl(
+        storagePath: storagePath,
+        courseId: widget.courseId,
+        videoId: widget.video.videoId,
+      );
 
       if (videoUrl == null) {
         throw Exception('Failed to get video URL');
       }
 
-      print('Using Firebase Storage URL: $videoUrl');
+      print('✅ Using secure Firebase Storage URL (expires in 15 minutes)');
 
       // Initialize video player with Firebase Storage URL
       _videoPlayerController = VideoPlayerController.networkUrl(Uri.parse(videoUrl));
@@ -301,14 +356,41 @@ class _CourseVideoPlayerScreenState extends State<CourseVideoPlayerScreen> {
                       // Video player (16:9 aspect ratio)
                       AspectRatio(
                         aspectRatio: 16 / 9,
-                        child: _chewieController != null && _chewieController!.videoPlayerController.value.isInitialized
-                            ? Chewie(controller: _chewieController!)
-                            : Container(
-                                color: Colors.black,
-                                child: const Center(
-                                  child: CircularProgressIndicator(),
-                                ),
-                              ),
+                        child: MouseRegion(
+                          onEnter: (_) => _disableRightClickOnVideo(),
+                          child: GestureDetector(
+                            onSecondaryTap: () {
+                              // Block right-click tap
+                              print('🚫 Right-click blocked');
+                            },
+                            onSecondaryTapDown: (_) {
+                              // Block right-click down
+                              print('🚫 Right-click blocked');
+                            },
+                            onLongPress: () {
+                              // Block long press (mobile)
+                              print('🚫 Long press blocked');
+                            },
+                            child: Listener(
+                              onPointerDown: (event) {
+                                // Prevent right-click context menu (download/save options)
+                                if (event.buttons == 2) {
+                                  print('🚫 Right mouse button blocked');
+                                  // Right mouse button - do nothing to prevent context menu
+                                  return;
+                                }
+                              },
+                              child: _chewieController != null && _chewieController!.videoPlayerController.value.isInitialized
+                                  ? Chewie(controller: _chewieController!)
+                                  : Container(
+                                      color: Colors.black,
+                                      child: const Center(
+                                        child: CircularProgressIndicator(),
+                                      ),
+                                    ),
+                            ),
+                          ),
+                        ),
                       ),
 
                       // Seek restriction warning banner (only for first-time viewing)

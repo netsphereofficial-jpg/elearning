@@ -16,9 +16,12 @@ service firebase.storage {
 
     // Video files storage
     match /videos/{videoFile} {
-      // For testing: Allow any authenticated user to upload/delete videos
-      allow write, delete: if isAuthenticated();
-      // Authenticated users can read videos (for enrolled courses)
+      // Only admins can upload/delete videos
+      allow write, delete: if isAdmin();
+
+      // TEMPORARY: Allow authenticated users to read videos
+      // TODO: Implement proper signed URL generation with IAM permissions
+      // For now, access control is done at application level (enrollment check in Cloud Function)
       allow read: if isAuthenticated();
     }
 
