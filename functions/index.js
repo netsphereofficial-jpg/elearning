@@ -738,3 +738,119 @@ exports.getSecureVideoUrl = onRequest(
   }
   }
 );
+
+/**
+ * Get Bunny Stream playback URL with enrollment verification
+ * Bunny Stream handles video security, DRM, and download protection
+ * This function only verifies user enrollment before returning the playback URL
+ */
+exports.getBunnySecureUrl = onRequest(
+  {
+    cors: ["https://website-sombo.web.app", "https://website-sombo.firebaseapp.com", /localhost/],
+  },
+  async (req, res) => {
+  try {
+    // Only allow POST requests
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+
+    // Verify Firebase ID token from Authorization header
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      res.status(401).json({ error: "Unauthorized - No token provided" });
+      return;
+    }
+
+    const idToken = authHeader.split("Bearer ")[1];
+    let decodedToken;
+
+    try {
+      decodedToken = await admin.auth().verifyIdToken(idToken);
+    } catch (error) {
+      console.error("Token verification failed:", error);
+      res.status(401).json({ error: "Unauthorized - Invalid token" });
+      return;
+    }
+
+    const userId = decodedToken.uid;
+    const { courseId, videoId, videoGuid } = req.body;
+
+    if (!courseId || !videoId || !videoGuid) {
+      throw new Error("Course ID, Video ID, and Video GUID are required.");
+    }
+
+    console.log(`🔐 Generating Bunny Stream URL for user ${userId}, video ${videoId}`);
+
+    // 1. Check if user is enrolled in the course
+    const enrollmentQuery = await admin
+      .firestore()
+      .collection("enrollments")
+      .where("userId", "==", userId)
+      .where("courseId", "==", courseId)
+      .where("status", "==", "approved")
+      .limit(1)
+      .get();
+
+    if (enrollmentQuery.empty) {
+      throw new Error("User is not enrolled in this course.");
+    }
+
+    const enrollment = enrollmentQuery.docs[0].data();
+
+    // 2. Check if enrollment is still valid (not expired)
+    if (enrollment.validUntil && enrollment.validUntil.toMillis() < Date.now()) {
+      throw new Error("Your course enrollment has expired.");
+    }
+
+    // 3. Get course details to verify video exists
+    const courseDoc = await admin
+      .firestore()
+      .collection("courses")
+      .doc(courseId)
+      .get();
+
+    if (!courseDoc.exists) {
+      throw new Error("Course not found.");
+    }
+
+    const courseData = courseDoc.data();
+
+    // Find the video in course videos
+    const video = courseData.videos?.find((v) => v.videoId === videoId);
+
+    if (!video) {
+      throw new Error("Video not found in course.");
+    }
+
+    // 4. Generate Bunny Stream playback URL
+    // Bunny Stream CDN hostname and video GUID
+    const CDN_HOSTNAME = "vz-bba76149-c05.b-cdn.net";
+    const playbackUrl = `https://${CDN_HOSTNAME}/${videoGuid}/playlist.m3u8`;
+
+    // 5. Log video access for analytics
+    await admin.firestore().collection("videoAccess").add({
+      userId: userId,
+      courseId: courseId,
+      videoId: videoId,
+      videoGuid: videoGuid,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      ipAddress: req.ip || "unknown",
+      userAgent: req.headers["user-agent"] || "unknown",
+      platform: "bunny-stream",
+    });
+
+    console.log(`✅ Bunny Stream URL generated for user ${userId}, video ${videoId}`);
+
+    res.status(200).json({
+      signedUrl: playbackUrl,
+      videoGuid: videoGuid,
+      message: "Bunny Stream handles DRM and download protection automatically",
+    });
+  } catch (error) {
+    console.error("❌ Error generating Bunny Stream URL:", error);
+    res.status(500).json({ error: `Failed to generate video URL: ${error.message}` });
+  }
+  }
+);

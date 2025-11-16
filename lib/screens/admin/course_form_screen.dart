@@ -3,7 +3,7 @@ import 'package:file_picker/file_picker.dart';
 import '../../constants/app_theme.dart';
 import '../../models/course_model.dart';
 import '../../services/admin_course_service.dart';
-import '../../services/simple_storage_service.dart';
+import '../../services/bunny_stream_service.dart';
 
 class CourseFormScreen extends StatefulWidget {
   final CourseModel? course;
@@ -274,7 +274,7 @@ class _VideoFormDialog extends StatefulWidget {
 
 class _VideoFormDialogState extends State<_VideoFormDialog> {
   final _formKey = GlobalKey<FormState>();
-  final SimpleStorageService _uploadService = SimpleStorageService();
+  final BunnyStreamService _uploadService = BunnyStreamService();
 
   late TextEditingController _titleController;
   late TextEditingController _descController;
@@ -358,10 +358,11 @@ class _VideoFormDialogState extends State<_VideoFormDialog> {
         _uploadProgress = 0.0;
       });
 
-      // Upload file to Firebase Storage
-      final storagePath = await _uploadService.uploadVideo(
+      // Upload file to Bunny Stream
+      final videoGuid = await _uploadService.uploadVideo(
         fileBytes: file.bytes!,
         fileName: file.name,
+        title: title,
         onProgress: (progress) {
           if (mounted) {
             setState(() {
@@ -371,18 +372,21 @@ class _VideoFormDialogState extends State<_VideoFormDialog> {
         },
       );
 
-      if (storagePath != null) {
+      if (videoGuid != null) {
+        // Get thumbnail URL from Bunny Stream
+        final thumbnailUrl = _uploadService.getThumbnailUrl(videoGuid);
+
         setState(() {
-          _videoKeyController.text = storagePath;
-          // Set thumbnail URL (you can generate thumbnails later)
-          _thumbController.text = '';
+          _videoKeyController.text = videoGuid;
+          _thumbController.text = thumbnailUrl;
         });
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Video uploaded successfully!'),
+              content: Text('Video uploaded to Bunny Stream successfully! Video is being transcoded...'),
               backgroundColor: AppTheme.successColor,
+              duration: Duration(seconds: 4),
             ),
           );
         }
@@ -413,7 +417,7 @@ class _VideoFormDialogState extends State<_VideoFormDialog> {
       videoId: widget.video?.videoId ?? 'video_${DateTime.now().millisecondsSinceEpoch}',
       title: _titleController.text.trim(),
       description: _descController.text.trim(),
-      bunnyVideoGuid: _videoKeyController.text.trim(), // Using same field for R2 key
+      bunnyVideoGuid: _videoKeyController.text.trim(), // Bunny Stream video GUID
       thumbnailUrl: _thumbController.text.trim(),
       durationInSeconds: int.parse(_durationController.text),
       order: int.parse(_orderController.text),
@@ -473,7 +477,7 @@ class _VideoFormDialogState extends State<_VideoFormDialog> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Upload to Firebase Storage • Supports large files',
+                      'Upload to Bunny Stream • Automatic transcoding & CDN delivery',
                       style: TextStyle(
                         fontSize: 11,
                         color: AppTheme.textSecondary,
@@ -500,7 +504,7 @@ class _VideoFormDialogState extends State<_VideoFormDialog> {
                     ],
                     const SizedBox(height: 8),
                     const Text(
-                      'OR enter storage path manually below',
+                      'OR enter video GUID manually below',
                       style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
                     ),
                   ],
@@ -517,7 +521,7 @@ class _VideoFormDialogState extends State<_VideoFormDialog> {
               TextFormField(
                 controller: _videoKeyController,
                 decoration: const InputDecoration(
-                  labelText: 'Storage Path',
+                  labelText: 'Video GUID',
                   hintText: 'Auto-filled after upload',
                 ),
                 validator: (v) => v?.isEmpty == true ? 'Required' : null,

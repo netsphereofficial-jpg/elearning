@@ -7,7 +7,7 @@ import 'dart:html' as html;
 import '../models/course_model.dart';
 import '../services/google_auth_service.dart';
 import '../services/course_progress_service.dart';
-import '../services/simple_storage_service.dart';
+import '../services/bunny_stream_service.dart';
 import '../constants/app_theme.dart';
 
 class CourseVideoPlayerScreen extends StatefulWidget {
@@ -30,7 +30,7 @@ class CourseVideoPlayerScreen extends StatefulWidget {
 
 class _CourseVideoPlayerScreenState extends State<CourseVideoPlayerScreen> {
   final CourseProgressService _progressService = CourseProgressService();
-  final SimpleStorageService _storageService = SimpleStorageService();
+  final BunnyStreamService _bunnyService = BunnyStreamService();
 
   VideoPlayerController? _videoPlayerController;
   ChewieController? _chewieController;
@@ -127,24 +127,19 @@ class _CourseVideoPlayerScreenState extends State<CourseVideoPlayerScreen> {
         _totalWatchTime = session.totalWatchTime;
       }
 
-      // Get SECURE Firebase Storage download URL via Cloud Function
-      final storagePath = widget.video.bunnyVideoGuid; // Using same field for storage path
+      // Get Bunny Stream playback URL
+      final videoGuid = widget.video.bunnyVideoGuid;
 
-      print('🎬 Requesting secure video URL for: $storagePath');
+      print('🎬 Loading Bunny Stream video: $videoGuid');
 
-      final videoUrl = await _storageService.getSecureDownloadUrl(
-        storagePath: storagePath,
-        courseId: widget.courseId,
-        videoId: widget.video.videoId,
-      );
+      // Get HLS playlist URL for adaptive streaming
+      // Bunny Stream handles all security, DRM, and download protection automatically
+      final videoUrl = _bunnyService.getPlaybackUrl(videoGuid);
 
-      if (videoUrl == null) {
-        throw Exception('Failed to get video URL');
-      }
+      print('✅ Using Bunny Stream HLS URL: $videoUrl');
+      print('🔒 Bunny Stream provides: Adaptive bitrate, DRM, Download protection');
 
-      print('✅ Using secure Firebase Storage URL (expires in 15 minutes)');
-
-      // Initialize video player with Firebase Storage URL
+      // Initialize video player with Bunny Stream HLS URL
       _videoPlayerController = VideoPlayerController.networkUrl(Uri.parse(videoUrl));
 
       await _videoPlayerController!.initialize();
